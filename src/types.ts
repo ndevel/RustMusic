@@ -175,8 +175,12 @@ export interface ScanState {
 }
 
 export interface DownloadState {
+  id: string;
   title: string;
   pct: number;
+  received: number;
+  total: number;
+  downloading: boolean;
 }
 
 export interface SettingsPayload {

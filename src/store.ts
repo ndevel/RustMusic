@@ -66,8 +66,9 @@ interface Store {
   /** 播放页无边框全屏（隐藏系统任务栏；播放条隐藏、hover 唤起） */
   fullscreen: boolean;
   queueOpen: boolean;
+  downloadsOpen: boolean;
   scan: ScanState;
-  download: DownloadState | null;
+  downloads: DownloadState[];
   toasts: Toast[];
   lyrics: LyricsPayload | null;
   lyricsLoading: boolean;
@@ -102,6 +103,8 @@ interface Store {
   ndCache: Record<string, NdSong>;
   /** 已下载到本地的 Navidrome 曲目：rid → 资料库曲目 id（区分“本地/在线”并优先本地播放） */
   ndLocal: Record<string, number>;
+  /** 所有已下载到本地的在线曲目：`"${kind}:${onlineId}"` → 资料库 trackId */
+  onlineLocal: Record<string, number>;
 
   quality: string;
   /** 关闭主窗口行为：tray = 最小化到托盘（默认）；exit = 直接退出应用 */
@@ -137,6 +140,7 @@ interface Store {
   /** 切换无边框全屏（退出时同时收起播放页） */
   toggleFullscreen(v?: boolean): void;
   setQueueOpen(v: boolean): void;
+  setDownloadsOpen(v: boolean): void;
 
   refreshTracks(): Promise<void>;
   refreshFolders(): Promise<void>;
@@ -250,6 +254,7 @@ interface Store {
     /** Navidrome 曲目的原始格式后缀（决定落盘扩展名） */
     suffix?: string;
   }): Promise<void>;
+  cancelDownload(id?: string): void;
   refreshLikedOnline(): Promise<void>;
   refreshRecentOnline(): Promise<void>;
   addOnlineToPlaylist(
@@ -363,8 +368,9 @@ export const useStore = create<Store>((set, get) => ({
   nowPlayingOpen: false,
   fullscreen: false,
   queueOpen: false,
+  downloadsOpen: false,
   scan: { active: false, done: 0, total: 0 },
-  download: null,
+  downloads: [],
   toasts: [],
   lyrics: null,
   lyricsLoading: false,
@@ -517,27 +523,39 @@ export const useStore = create<Store>((set, get) => ({
 
     unbinds.push(
       await listenEvent<{
-        url: string;
+        id: string;
+        title?: string;
         pct?: number;
-        done?: boolean;
+        downloading?: boolean;
         error?: string;
         received?: number;
         total?: number;
-      }>("download://progress", (p) => {
+      }>("online-download://progress", (p) => {
         if (p.error) {
-          set({ download: null });
-          get().toast(`音源下载失败：${p.error}`, "error");
+          set((s) => ({ downloads: s.downloads.filter((d) => d.id !== p.id) }));
+          get().toast(`下载失败：${p.error}`, "error");
           return;
         }
-        if (p.done) {
-          set({ download: null });
+        if (p.downloading === false) {
+          set((s) => ({ downloads: s.downloads.filter((d) => d.id !== p.id) }));
           return;
         }
-        set({
-          download: {
-            title: p.url.split("/").pop() ?? p.url,
+        set((s) => {
+          const item: DownloadState = {
+            id: p.id,
+            title: p.title ?? p.id,
             pct: p.pct ?? 0,
-          },
+            received: p.received ?? 0,
+            total: p.total ?? 0,
+            downloading: true,
+          };
+          const idx = s.downloads.findIndex((d) => d.id === p.id);
+          if (idx >= 0) {
+            const next = [...s.downloads];
+            next[idx] = item;
+            return { downloads: next };
+          }
+          return { downloads: [...s.downloads, item] };
         });
       })
     );
@@ -635,6 +653,10 @@ export const useStore = create<Store>((set, get) => ({
 
   setQueueOpen(v) {
     set({ queueOpen: v });
+  },
+
+  setDownloadsOpen(v) {
+    set({ downloadsOpen: v });
   },
 
   // ---------- 数据刷新 ----------
@@ -1471,7 +1493,16 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   async downloadOnline(row) {
-    get().toast("开始下载…", "info");
+    const downloadId = `dl-${row.kind}-${row.id}-${Date.now()}`;
+    const item: DownloadState = {
+      id: downloadId,
+      title: row.name,
+      pct: 0,
+      received: 0,
+      total: 0,
+      downloading: true,
+    };
+    set((s) => ({ downloads: [...s.downloads, item] }));
     try {
       const name = await api.downloadOnline({
         kind: row.kind,
@@ -1483,14 +1514,20 @@ export const useStore = create<Store>((set, get) => ({
         durationMs: row.durationMs,
         mediaMid: row.mediaMid ?? "",
         suffix: row.suffix ?? "",
-      });
+      }, downloadId);
       await get().refreshTracks();
-      // Navidrome：刷新“本地/在线”映射，下载完即可直接播本地文件
       if (row.kind === "navidrome") await get().refreshNdLocal();
       get().toast(`已下载到资料库：${name}`, "success");
     } catch (e) {
-      get().toast(String(e), "error");
+      if (String(e) !== "下载已取消") get().toast(String(e), "error");
     }
+  },
+
+  cancelDownload(id?: string) {
+    const targetId = id ?? get().downloads[0]?.id;
+    if (!targetId) return;
+    api.cancelOnlineDownload(targetId).catch(() => {});
+    set((s) => ({ downloads: s.downloads.filter((d) => d.id !== targetId) }));
   },
 
   async refreshLikedOnline() {

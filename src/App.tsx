@@ -5,6 +5,7 @@ import Titlebar from "./components/Titlebar";
 import Sidebar from "./components/Sidebar";
 import PlayerBar from "./components/PlayerBar";
 import QueuePanel from "./components/QueuePanel";
+import DownloadsPanel from "./components/DownloadsPanel";
 import NowPlaying from "./components/NowPlaying";
 import Logo from "./components/Logo";
 import ToastContainer from "./components/Toast";
@@ -229,6 +230,7 @@ export default function App() {
       {/* 播放队列：窗口级浮层（播放条上方右侧，z-[61] 盖在播放页 z-40 /
           播放条 z-50 之上，播放页/全屏下也能弹出） */}
       {queueOpen && <QueuePanel />}
+      <DownloadsPanel />
 
       {/* 播放页：窗口级覆盖（背景与标题栏连为一体） */}
       {nowPlayingOpen && <NowPlaying />}

@@ -128,7 +128,9 @@ export const api = {
     mediaMid: string;
     /** Navidrome 曲目的原始格式后缀（决定落盘扩展名） */
     suffix?: string;
-  }) => invoke<string>("download_online", { req }),
+  }, downloadId: string) => invoke<string>("download_online", { req, downloadId }),
+  cancelOnlineDownload: (downloadId: string) =>
+    invoke<boolean>("cancel_online_download", { downloadId }),
   /** 已下载到本地的在线曲目映射（rid → 资料库曲目 id） */
   downloadedOnlineMap: (kind: string) =>
     invoke<{ rid: string; trackId: number }[]>("downloaded_online_map", { kind }),

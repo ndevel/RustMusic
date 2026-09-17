@@ -1,5 +1,6 @@
 import {
   ChevronUp,
+  Download,
   Heart,
   ListMusic,
   Pause,
@@ -12,6 +13,7 @@ import {
   Volume1,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import { useMemo, useRef, useState, useEffect } from "react";
 import { useStore } from "../store";
@@ -89,7 +91,10 @@ export default function PlayerBar({ centered = false }: { centered?: boolean }) 
   const speed = useStore((s) => s.speed);
   const repeat = useStore((s) => s.repeat);
   const shuffle = useStore((s) => s.shuffle);
-  const download = useStore((s) => s.download);
+  const downloads = useStore((s) => s.downloads);
+  const cancelDownload = useStore((s) => s.cancelDownload);
+  const downloadsOpen = useStore((s) => s.downloadsOpen);
+  const setDownloadsOpen = useStore((s) => s.setDownloadsOpen);
   const queue = useStore((s) => s.queue);
   const queueOpen = useStore((s) => s.queueOpen);
   const nowPlayingOpen = useStore((s) => s.nowPlayingOpen);
@@ -152,15 +157,29 @@ export default function PlayerBar({ centered = false }: { centered?: boolean }) 
         centered ? "left-0" : "left-[236px]"
       }`}
     >
-      {download && (
-        <div className="absolute left-8 right-8 top-0 h-[3px] bg-[var(--shade)] rounded-full overflow-hidden">
-          <div
-            className="h-full transition-all duration-300 rounded-full"
-            style={{
-              width: `${download.pct}%`,
-              background: "var(--accent)",
-            }}
-          />
+      {downloads.length > 0 && (
+        <div className="absolute left-8 right-8 top-0 flex items-center gap-2 h-[3px]">
+          <div className="flex-1 h-full bg-[var(--shade)] rounded-full overflow-hidden">
+            <div
+              className="h-full transition-all duration-300 rounded-full"
+              style={{
+                width: `${downloads.length === 1 ? downloads[0].pct : Math.round(downloads.reduce((a, d) => a + d.pct, 0) / downloads.length)}%`,
+                background: "var(--accent)",
+              }}
+            />
+          </div>
+          <span className="text-[10px] text-[var(--ink)] opacity-60 tabular-nums shrink-0">
+            {downloads.length === 1
+              ? `${downloads[0].pct}%`
+              : `${downloads.length} 个下载`}
+          </span>
+          <button
+            onClick={() => setDownloadsOpen(!downloadsOpen)}
+            className="shrink-0 p-0.5 rounded hover:bg-white/10 text-[var(--ink)] opacity-50 hover:opacity-100 transition-opacity text-[10px]"
+            title="查看下载列表"
+          >
+            <X size={10} />
+          </button>
         </div>
       )}
 
@@ -465,6 +484,21 @@ export default function PlayerBar({ centered = false }: { centered?: boolean }) 
               </span>
             )}
           </button>
+          {downloads.length > 0 && (
+            <button
+              className={`btn-ghost relative w-9 h-9 ${downloadsOpen ? "!text-[var(--accent)]" : ""}`}
+              onClick={() => setDownloadsOpen(!downloadsOpen)}
+              title="下载列表"
+            >
+              <Download size={16} />
+              <span
+                className="absolute -top-1 -right-1 text-[9.5px] text-[var(--accent-on)] rounded-full min-w-[15px] leading-[15px] font-bold text-center px-0.5"
+                style={{ background: "var(--accent)" }}
+              >
+                {downloads.length}
+              </span>
+            </button>
+          )}
         </div>
       </div>
     </div>

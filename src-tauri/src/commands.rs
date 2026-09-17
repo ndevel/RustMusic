@@ -943,7 +943,71 @@ pub async fn download_online(
     app: AppHandle,
     state: State<'_, AppState>,
     req: OnlineSaveReq,
+    download_id: String,
 ) -> Result<String, String> {
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut downloads = state.downloads.lock();
+        if downloads.contains_key(&download_id) {
+            return Err("下载任务已存在".into());
+        }
+        downloads.insert(download_id.clone(), cancelled.clone());
+    }
+    let _ = app.emit("online-download://progress", json!({
+        "id": &download_id, "received": 0, "total": 0, "pct": 0, "phase": "preparing"
+    }));
+    let worker_app = app.clone();
+    let worker_id = download_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = worker_app.state::<AppState>();
+        download_online_inner(&worker_app, &state, req, &worker_id, &cancelled)
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    state.downloads.lock().remove(&download_id);
+    let _ = app.emit("online-download://progress", json!({ "id": download_id, "downloading": false }));
+    result
+}
+
+#[tauri::command]
+pub async fn cancel_online_download(
+    state: State<'_, AppState>,
+    download_id: String,
+) -> Result<bool, String> {
+    let downloads = state.downloads.lock();
+    if let Some(cancelled) = downloads.get(&download_id) {
+        cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+struct PartialDownload(std::path::PathBuf);
+
+impl Drop for PartialDownload {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn check_download_cancelled(cancelled: &std::sync::atomic::AtomicBool) -> Result<(), String> {
+    if cancelled.load(std::sync::atomic::Ordering::SeqCst) {
+        Err("下载已取消".into())
+    } else {
+        Ok(())
+    }
+}
+
+fn download_online_inner(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    req: OnlineSaveReq,
+    _download_id: &str,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<String, String> {
+    check_download_cancelled(cancelled)?;
     let title = req.title.trim().to_string();
     if title.is_empty() {
         return Err("歌曲标题为空".into());
@@ -983,7 +1047,7 @@ pub async fn download_online(
         _ => return Err("未知音源类型".into()),
     };
 
-    // 2) 下载到保存目录
+    // 2) 下载到临时文件，完成后 rename（RAII 保证取消/失败时自动清理残留）
     let dir = save_dir(&state);
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建保存目录失败: {e}"))?;
     let artist = sanitize_filename(&req.artist);
@@ -994,16 +1058,18 @@ pub async fn download_online(
         ext
     );
     let dest = dir.join(&name);
-    let mut file = std::fs::File::create(&dest).map_err(|e| format!("创建文件失败: {e}"))?;
+    let tmp = dest.with_extension(format!("dlpart.{ext}"));
+    let _guard = PartialDownload(tmp.clone());
+    let mut file = std::fs::File::create(&tmp).map_err(|e| format!("创建文件失败: {e}"))?;
     let (total, reader) = http_get_for(&req.kind, &url)?;
     let mut reader = reader.take(128 * 1024 * 1024);
     let mut buf = [0u8; 64 * 1024];
     let mut received: u64 = 0;
     let mut last_emit = std::time::Instant::now();
     let mut emitted = false;
-    // 分块读取并回报进度（download://progress 驱动进度条；无 content-length 时 pct 为 0）
     let dl = (|| -> Result<(), String> {
         loop {
+            check_download_cancelled(cancelled)?;
             let n = reader.read(&mut buf).map_err(|e| format!("下载失败: {e}"))?;
             if n == 0 {
                 break;
@@ -1020,8 +1086,8 @@ pub async fn download_online(
                     0
                 };
                 let _ = app.emit(
-                    "download://progress",
-                    json!({ "url": &title, "received": received, "total": total, "pct": pct.min(99), "done": false }),
+                    "online-download://progress",
+                    json!({ "id": _download_id, "title": &title, "received": received, "total": total, "pct": pct.min(99), "downloading": true }),
                 );
             }
         }
@@ -1029,16 +1095,18 @@ pub async fn download_online(
     })();
     drop(file);
     if let Err(e) = dl {
-        // 已发过进度则先清掉进度条；错误提示由命令返回值统一 toast，避免重复弹窗
         if emitted {
-            let _ = app.emit("download://progress", json!({ "url": &title, "done": true }));
+            let _ = app.emit("online-download://progress", json!({ "id": _download_id, "title": &title, "error": &e }));
         }
         return Err(e);
     }
+    let final_total = if total == 0 { received } else { total };
     let _ = app.emit(
-        "download://progress",
-        json!({ "url": &title, "received": received, "total": if total == 0 { received } else { total }, "pct": 100, "done": true }),
+        "online-download://progress",
+        json!({ "id": _download_id, "title": &title, "received": received, "total": final_total, "pct": 100, "downloading": false }),
     );
+    std::fs::rename(&tmp, &dest).map_err(|e| format!("重命名文件失败: {e}"))?;
+    std::mem::forget(_guard);
 
     // 3) 取歌词并写标签（失败静默）
     let lyrics = match req.kind.as_str() {

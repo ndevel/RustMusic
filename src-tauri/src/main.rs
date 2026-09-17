@@ -26,6 +26,7 @@ pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub engine: Mutex<Arc<engine::Engine>>,
     pub app_data: std::path::PathBuf,
+    pub downloads: Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
 }
 
 fn show_main(app: &AppHandle) {
@@ -283,6 +284,7 @@ fn main() {
                 db: Mutex::new(conn),
                 engine: Mutex::new(eng),
                 app_data: app_data.clone(),
+                downloads: Mutex::new(std::collections::HashMap::new()),
             });
 
             let mhandle = handle.clone();
@@ -342,6 +344,7 @@ fn main() {
             commands::qq_logout,
             commands::like_online,
             commands::download_online,
+            commands::cancel_online_download,
             commands::liked_online_list,
             commands::recent_online_list,
             commands::save_dir_get,
