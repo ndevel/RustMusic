@@ -232,80 +232,86 @@ pub fn lyric(cfg: &NdConfig, id: &str) -> Result<Option<LyricsPayload>, String> 
     }))
 }
 
-/// 将 OpenSubsonic lyricsList（structuredLines / line）转为 LRC 文本后解析
+/// OpenSubsonic: lyricsList.structuredLyrics[].line[]。
+/// 每项是一份完整歌词（可能为不同语言），优先同步版本，不拼接多个版本。
 fn parse_lyrics_list(list: &serde_json::Value) -> Option<LyricsPayload> {
-    // structuredLines: [{ start: ms?, line: [{ start?, value }] }]
-    let structured = list.get("structuredLines").and_then(|v| v.as_array());
-    if let Some(lines) = structured {
-        let mut out = String::new();
-        let mut synced = false;
-        for entry in lines {
-            let text = entry
-                .get("line")
-                .and_then(|l| l.as_array())
-                .map(|words| {
-                    words
-                        .iter()
-                        .filter_map(|w| w.get("value").and_then(|v| v.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("")
-                })
-                .unwrap_or_default();
-            // 时间取行 start，缺省取首字 start
-            let start_ms = entry
-                .get("start")
-                .and_then(|v| v.as_i64())
-                .or_else(|| {
-                    entry
-                        .get("line")
-                        .and_then(|l| l.as_array())
-                        .and_then(|w| w.first())
-                        .and_then(|w| w.get("start"))
-                        .and_then(|v| v.as_i64())
-                });
-            push_line(&mut out, &mut synced, start_ms, &text);
-        }
-        if !out.trim().is_empty() {
-            let p = crate::lyrics::parse(&out);
-            return Some(LyricsPayload {
-                synced: synced && p.synced,
-                lines: p.lines,
+    let versions = list.get("structuredLyrics")?.as_array()?;
+    let mut best: Option<LyricsPayload> = None;
+    for version in versions {
+        let Some(entries) = version.get("line").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        let synced = version.get("synced").and_then(|v| v.as_bool()).unwrap_or(false);
+        // OpenSubsonic 正偏移表示提前显示，与内部 LRC offset 的方向不同。
+        let offset = version.get("offset").and_then(|v| v.as_i64()).unwrap_or(0);
+        let mut lines = Vec::new();
+        for entry in entries {
+            let Some(text) = entry.get("value").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let time_ms = if synced {
+                entry.get("start").and_then(|v| v.as_i64())
+                    .map(|ms| ms.saturating_sub(offset).max(0) as u64)
+            } else {
+                None
+            };
+            lines.push(crate::models::LyricLine {
+                time_ms,
+                text: text.to_string(),
+                words: None,
             });
         }
-        return None;
-    }
-    // line: [{ start?, value }]
-    let plain = list.get("line").and_then(|v| v.as_array());
-    if let Some(lines) = plain {
-        let mut out = String::new();
-        let mut synced = false;
-        for entry in lines {
-            let text = entry
-                .get("value")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let start_ms = entry.get("start").and_then(|v| v.as_i64());
-            push_line(&mut out, &mut synced, start_ms, &text);
+        if !lines.iter().any(|line| !line.text.trim().is_empty()) {
+            continue;
         }
-        if !out.trim().is_empty() {
-            let p = crate::lyrics::parse(&out);
-            return Some(LyricsPayload {
-                synced: synced && p.synced,
-                lines: p.lines,
-            });
+        let synced = synced && lines.iter().any(|line| line.time_ms.is_some());
+        if synced {
+            lines.sort_by_key(|line| line.time_ms.unwrap_or(u64::MAX));
+        }
+        let payload = LyricsPayload { synced, lines };
+        if best.as_ref().map_or(true, |old| payload.synced && !old.synced) {
+            best = Some(payload);
         }
     }
-    None
+    best
 }
 
-fn push_line(out: &mut String, synced: &mut bool, start_ms: Option<i64>, text: &str) {
-    if let Some(ms) = start_ms {
-        *synced = true;
-        let m = ms / 60000;
-        let s = (ms % 60000) / 1000;
-        let cs = (ms % 1000) / 10;
-        out.push_str(&format!("[{m:02}:{s:02}.{cs:02}]{text}\n"));
-    } else {
-        out.push_str(&format!("{text}\n"));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn embedded_plain_lyrics_from_standard_response() {
+        let list = json!({"structuredLyrics": [{"lang":"xxx", "synced":false,
+            "line":[{"value":"第一句"},{"value":"第二句"}]}]});
+        let p = parse_lyrics_list(&list).unwrap();
+        assert!(!p.synced);
+        assert_eq!(p.lines.len(), 2);
+        assert_eq!(p.lines[0].text, "第一句");
+        assert_eq!(p.lines[0].time_ms, None);
+    }
+
+    #[test]
+    fn prefers_synced_and_applies_offset_without_losing_precision() {
+        let list = json!({"structuredLyrics": [
+            {"synced":false,"line":[{"value":"普通文本"}]},
+            {"synced":true,"offset":100,"line":[
+                {"start":3001,"value":"第二句"},{"start":0,"value":"第一句"}]}]});
+        let p = parse_lyrics_list(&list).unwrap();
+        assert!(p.synced);
+        assert_eq!(p.lines[0].time_ms, Some(0));
+        assert_eq!(p.lines[1].time_ms, Some(2901));
+        let serialized = serde_json::to_value(p).unwrap();
+        assert_eq!(serialized["lines"][1]["timeMs"], 2901);
+    }
+
+    #[test]
+    fn negative_offset_delays_and_empty_versions_are_skipped() {
+        let list = json!({"structuredLyrics": [{"line":[]},
+            {"synced":true,"offset":-100,"line":[{"start":0,"value":"歌词"}]}]});
+        assert_eq!(parse_lyrics_list(&list).unwrap().lines[0].time_ms, Some(100));
+        assert!(parse_lyrics_list(&json!({"structuredLyrics":[]})).is_none());
+        assert!(parse_lyrics_list(&json!({})).is_none());
     }
 }

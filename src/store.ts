@@ -304,13 +304,14 @@ function titleOfQueueItem(
 async function pushDesktopLyrics(
   s: Pick<
     Store,
-    "lyrics" | "pos" | "dur" | "playing" | "current" | "desktopLyricsOn"
+    "lyrics" | "lyricsLoading" | "pos" | "dur" | "playing" | "current" | "desktopLyricsOn"
   > & { dlyricsColors?: DesktopLyricsColors }
 ) {
   if (!s.desktopLyricsOn) return;
   try {
     const { emit } = await import("@tauri-apps/api/event");
-    emit("dlyrics://push", {
+    await emit("dlyrics://push", {
+      loading: s.lyricsLoading,
       lines: s.lyrics?.lines ?? null,
       synced: s.lyrics?.synced ?? false,
       pos: s.pos,
@@ -417,6 +418,11 @@ export const useStore = create<Store>((set, get) => ({
     applyLyricsColors(get().lyricsColors);
     // Navidrome 连接配置（未配置时静默）
     void get().ndLoadConfig();
+    unbinds.push(
+      await listenEvent("dlyrics://ready", () => {
+        void pushDesktopLyrics({ ...get(), desktopLyricsOn: true });
+      })
+    );
     unbinds.push(
       await listenEvent<PlayState>("player://state", (p) => {
         const liked =

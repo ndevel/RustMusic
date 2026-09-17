@@ -1,6 +1,5 @@
 use std::io::{Read, Write};
 use serde_json::json;
-use lofty::prelude::*;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db;
@@ -182,15 +181,10 @@ pub async fn get_lyrics(
         }
     }
 
-    // 内嵌歌词
-    if let Ok(tagged) = lofty::read_from_path(&path) {
-        if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
-            if let Some(text) = tag.get_string(&lofty::tag::ItemKey::Lyrics) {
-                let p = lyrics::parse(text);
-                if !p.lines.is_empty() {
-                    return Ok(LyricsPayload { synced: p.synced, lines: p.lines });
-                }
-            }
+    // 内嵌歌词（USLT / TXXX:Lyrics / SYLT / LYRICS / ©lyr 等）
+    if let Some(payload) = lyrics::embedded(std::path::Path::new(&path)) {
+        if !payload.lines.is_empty() {
+            return Ok(payload);
         }
     }
     Ok(LyricsPayload { synced: false, lines: vec![] })

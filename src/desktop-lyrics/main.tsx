@@ -14,6 +14,7 @@ import { lyricLineProgress } from "../utils";
 import "../index.css";
 
 interface PushPayload {
+  loading?: boolean;
   lines: LyricLine[] | null;
   synced: boolean;
   pos: number;
@@ -76,7 +77,11 @@ function DesktopLyrics() {
       });
     }).then((u) => {
       if (disposed) u?.();
-      else un = u as unknown as (() => void) | undefined;
+      else {
+        un = u as unknown as (() => void) | undefined;
+        // 监听建立后请求快照：暂停时没有后续进度事件来补发。
+        void import("@tauri-apps/api/event").then(({ emit }) => emit("dlyrics://ready"));
+      }
     });
     return () => {
       disposed = true;
@@ -137,6 +142,29 @@ function DesktopLyrics() {
       ? syncedLines[activeIdx + 1]
       : null;
 
+  // 非同步歌词（内嵌纯文本，无时间标签）：按曲目时长均匀推进逐行展示。
+  // 无法精确对齐演唱进度，但能让有歌词的曲目正常展示而非显示"纯音乐"。
+  const plainLines = data.synced
+    ? []
+    : (data.lines ?? []).map((l) => l.text.trim()).filter(Boolean);
+  let plainIdx = -1;
+  let plainNext = "";
+  if (!data.synced && plainLines.length) {
+    // 时长未知（dur=0）时不推进，避免比例除零导致直接跳到末行
+    const ratio = data.dur > 0 ? posNow / data.dur : 0;
+    plainIdx = Math.min(
+      plainLines.length - 1,
+      Math.max(0, Math.floor(ratio * plainLines.length))
+    );
+    if (plainIdx + 1 < plainLines.length) plainNext = plainLines[plainIdx + 1];
+  }
+
+  // 同步歌词但进度尚未到第一句（前奏期）：预告下一句而非显示"纯音乐"
+  const upcoming =
+    data.synced && syncedLines.length
+      ? (syncedLines[activeIdx + 1] ?? syncedLines[0])
+      : null;
+
   // 染色推进：逐字时间戳按实际演唱节奏；行级 LRC 按字宽加权
   const fillRatio = active
     ? lyricLineProgress(
@@ -178,7 +206,9 @@ function DesktopLyrics() {
     await getCurrentWindow().startResizeDragging("SouthEast");
   };
 
-  const idleText = data.playing ? "纯音乐，请欣赏" : "等待播放…";
+  const idleText = data.loading
+    ? "正在加载歌词…"
+    : data.title ? "未获取到歌词" : "等待播放…";
 
   return (
     // 全窗拖拽热区（含歌词上方空白）；hover 才浮现半透明底与控制条
@@ -325,6 +355,46 @@ function DesktopLyrics() {
               </div>
             )}
           </>
+        ) : plainIdx >= 0 ? (
+          <>
+            <div
+              className="whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
+              style={{
+                fontSize: mainFont,
+                fontWeight: 800,
+                color: colors.unsung,
+                letterSpacing: "0.02em",
+                lineHeight: 1.25,
+                textShadow: "0 2px 14px rgba(0,0,0,0.55)",
+              }}
+            >
+              {plainLines[plainIdx]}
+            </div>
+            {plainNext && (
+              <div
+                className="whitespace-nowrap max-w-full overflow-hidden"
+                style={{
+                  fontSize: nextFont,
+                  color: colors.next,
+                  textShadow: "0 1px 6px rgba(0,0,0,0.45)",
+                }}
+              >
+                {plainNext}
+              </div>
+            )}
+          </>
+        ) : upcoming ? (
+          <div
+            className="whitespace-nowrap max-w-full overflow-hidden"
+            style={{
+              fontSize: Math.round(26 * scale),
+              fontWeight: 700,
+              color: colors.next,
+              textShadow: "0 2px 12px rgba(0,0,0,0.5)",
+            }}
+          >
+            {upcoming.text}
+          </div>
         ) : (
           <div
             className="whitespace-nowrap"

@@ -1,4 +1,8 @@
-use crate::models::{LyricLine, Word};
+use crate::models::{LyricLine, LyricsPayload, Word};
+use lofty::prelude::*;
+use lofty::tag::{ItemKey, ItemValue};
+use std::borrow::Cow;
+use std::path::Path;
 
 pub struct Parsed {
     pub synced: bool,
@@ -204,6 +208,195 @@ pub fn yrc_to_enhanced_lrc(yrc: &str) -> Option<String> {
 pub fn fmt_lrc_time(ms: u64) -> String {
     let csec = ms / 10;
     format!("{}:{:02}.{:02}", csec / 6000, (csec / 100) % 60, csec % 100)
+}
+
+// ---------- 内嵌歌词（音频标签） ----------
+
+/// 从音频文件标签中提取内嵌歌词。覆盖常见存放方式：
+/// - 通用标签键：ID3v2 USLT、Vorbis `LYRICS`、MP4 `©lyr`、APE `Lyrics`
+/// - 自定义键：名称含 "lyric" 的文本项（如 TXXX 描述、Vorbis 自定义键）
+/// - MP3 深度读取：TXXX:Lyrics 与 SYLT 同步歌词（通用转换会丢弃这两种帧）
+/// 优先返回同步歌词；仅当完全没有时间标签时 synced = false。
+pub fn embedded(path: &Path) -> Option<LyricsPayload> {
+    let mut best: Option<Parsed> = None;
+
+    /// 收集候选文本：优先保留同步歌词（synced），同级别取先到者
+    fn consider_text(best: &mut Option<Parsed>, text: &str) {
+        let p = parse(text);
+        if p.lines.is_empty() {
+            return;
+        }
+        let better = match &best {
+            None => true,
+            Some(b) => p.synced && !b.synced,
+        };
+        if better {
+            *best = Some(p);
+        }
+    }
+
+    // 1) 通用标签读取（覆盖 FLAC/OGG/M4A/APE 与 MP3 的 USLT）
+    if let Ok(tagged) = lofty::read_from_path(path) {
+        for tag in tagged.tags() {
+            if let Some(text) = tag.get_string(&ItemKey::Lyrics) {
+                consider_text(&mut best, text);
+            }
+            // 自定义键（大小写/前缀各异，如 "LYRICS"、"Unsynchronized lyrics"）
+            for item in tag.items() {
+                let key = match item.key() {
+                    ItemKey::Unknown(k) => k,
+                    _ => continue,
+                };
+                if !key.to_ascii_lowercase().contains("lyric") {
+                    continue;
+                }
+                if let ItemValue::Text(s) = item.value() {
+                    consider_text(&mut best, s);
+                }
+            }
+        }
+    }
+
+    // 2) MP3 深度读取：TXXX 与 SYLT 帧在通用 Tag 转换中会被丢弃
+    if let Ok(mut fp) = std::fs::File::open(path) {
+        if let Ok(file) =
+            lofty::mpeg::MpegFile::read_from(&mut fp, lofty::config::ParseOptions::new())
+        {
+            if let Some(id3) = file.id3v2() {
+                // 所有 USLT 帧（get_string 只取第一条，这里全量收集）
+                for uslt in id3.unsync_text() {
+                    consider_text(&mut best, &uslt.content);
+                }
+                // TXXX 常见描述名
+                for desc in ["Lyrics", "LYRICS", "lyrics", "UnsyncedLyrics", "SyncedLyrics"] {
+                    if let Some(t) = id3.get_user_text(desc) {
+                        consider_text(&mut best, t);
+                    }
+                }
+                // SYLT 同步歌词（lofty 读作 Binary 帧，手动解析为 LRC）
+                if let Some(fr) =
+                    id3.get(&lofty::id3::v2::FrameId::Valid(Cow::Borrowed("SYLT")))
+                {
+                    if let lofty::id3::v2::Frame::Binary(bin) = fr {
+                        if let Some(lrc) = parse_sylt(&bin.data) {
+                            consider_text(&mut best, &lrc);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    best.map(|p| LyricsPayload { synced: p.synced, lines: p.lines })
+}
+
+/// 解析 ID3v2 SYLT 帧负载为 LRC 文本。
+/// 布局：[encoding:1][language:3][timestamp_format:1][content_type:1]
+///       [描述符:按编码终止] + 若干 (文本:按编码终止, 时间戳:u32 BE)
+/// 仅支持毫秒时间戳（timestamp_format = 2）。
+fn parse_sylt(data: &[u8]) -> Option<String> {
+    if data.len() < 7 {
+        return None;
+    }
+    let encoding = data[0];
+    if data[4] != 2 {
+        // MPEG 帧数时间戳：无法换算为时间轴，跳过
+        return None;
+    }
+    let mut i = 6usize; // 跳过 encoding/language/timestamp_format/content_type
+    let mut le: Option<bool> = None;
+    // 描述符（跳过）
+    let _ = decode_terminated(data, &mut i, encoding, &mut le)?;
+    let mut out = String::new();
+    while i < data.len() {
+        let text = match decode_terminated(data, &mut i, encoding, &mut le) {
+            Some(t) => t,
+            None => break,
+        };
+        if i + 4 > data.len() {
+            break;
+        }
+        let ms = u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+        i += 4;
+        if !text.trim().is_empty() {
+            let m = ms / 60000;
+            let s = (ms % 60000) / 1000;
+            let cs = (ms % 1000) / 10;
+            out.push_str(&format!("[{m:02}:{s:02}.{cs:02}]{text}\n"));
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// 读取以编码对应终止符结尾的字符串，返回解码文本并推进游标。
+/// `le` 记录 UTF-16 的字节序（首个带 BOM 的字符串确定后沿用）。
+fn decode_terminated(
+    data: &[u8],
+    i: &mut usize,
+    encoding: u8,
+    le: &mut Option<bool>,
+) -> Option<String> {
+    match encoding {
+        0 | 3 => {
+            // Latin-1 / UTF-8：单字节 0x00 终止
+            let start = *i;
+            let end = data[start..].iter().position(|&b| b == 0)? + start;
+            *i = end + 1;
+            let text = if encoding == 3 {
+                String::from_utf8_lossy(&data[start..end]).into_owned()
+            } else {
+                data[start..end].iter().map(|&b| b as char).collect()
+            };
+            Some(text)
+        }
+        1 | 2 => {
+            // UTF-16（1 = 带 BOM，2 = 大端）：0x00 0x00 终止，按 2 字节对齐扫描
+            let mut start = *i;
+            let mut little = match *le {
+                Some(v) => v,
+                None => {
+                    let has_bom = start + 1 < data.len()
+                        && ((data[start] == 0xFF && data[start + 1] == 0xFE)
+                            || (data[start] == 0xFE && data[start + 1] == 0xFF));
+                    let v = if has_bom { data[start] == 0xFF } else { encoding == 1 };
+                    *le = Some(v);
+                    v
+                }
+            };
+            // 每段开头可能重复出现 BOM：剥除
+            if start + 1 < data.len()
+                && ((data[start] == 0xFF && data[start + 1] == 0xFE)
+                    || (data[start] == 0xFE && data[start + 1] == 0xFF))
+            {
+                little = data[start] == 0xFF;
+                *le = Some(little);
+                start += 2;
+            }
+            let mut units: Vec<u16> = Vec::new();
+            let mut j = start;
+            while j + 1 < data.len() {
+                let u = if little {
+                    u16::from_le_bytes([data[j], data[j + 1]])
+                } else {
+                    u16::from_be_bytes([data[j], data[j + 1]])
+                };
+                j += 2;
+                if u == 0 {
+                    break;
+                }
+                units.push(u);
+            }
+            *i = j;
+            let text = String::from_utf16_lossy(&units);
+            // 去掉可能残留的 BOM 字符
+            Some(text.trim_start_matches('\u{feff}').to_string())
+        }
+        _ => None,
+    }
 }
 
 /// [mm:ss] / [mm:ss.xx] / [mm:ss.xxx] → 毫秒
