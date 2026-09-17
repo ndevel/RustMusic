@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS online_tracks (
   media_mid TEXT NOT NULL DEFAULT '',
   vip INTEGER NOT NULL DEFAULT 0,
   downloaded INTEGER NOT NULL DEFAULT 0,
+  downloaded_track_id INTEGER NOT NULL DEFAULT 0,
   last_played INTEGER NOT NULL DEFAULT 0,
   play_count INTEGER NOT NULL DEFAULT 0,
   UNIQUE(kind, rid)
@@ -106,6 +107,12 @@ pub fn migrate(conn: &Connection) {
     // 若放进一个 execute_batch，第一条失败会中止整批，后续列永远补不上
     // （线上曾因此停留在旧 schema：playlist_entries/recent_online_list
     //  查询 last_played/missing 静默失败，歌单条目与最近播放全空）
+    add_column_if_missing(
+        conn,
+        "online_tracks",
+        "downloaded_track_id",
+        "ALTER TABLE online_tracks ADD COLUMN downloaded_track_id INTEGER NOT NULL DEFAULT 0",
+    );
     add_column_if_missing(
         conn,
         "online_tracks",
@@ -305,6 +312,16 @@ pub fn upsert_track(conn: &Connection, t: &NewTrack) {
             t.size, t.mtime, now_secs(),
         ],
     );
+}
+
+/// 按文件路径取资料库曲目 id（下载入库后回填在线条目用）
+pub fn track_id_by_path(conn: &Connection, path: &str) -> Option<i64> {
+    conn.query_row(
+        "SELECT id FROM tracks WHERE path = ?1",
+        params![path],
+        |r| r.get(0),
+    )
+    .ok()
 }
 
 pub fn track_paths(conn: &Connection) -> Vec<(String, i64, i64)> {
@@ -883,10 +900,48 @@ pub fn is_liked_online(conn: &Connection, kind: &str, rid: &str) -> bool {
     .is_ok()
 }
 
-pub fn mark_online_downloaded(conn: &Connection, kind: &str, rid: &str) {
+/// 标记在线曲目已下载到本地，并记录对应的资料库曲目 id（前端据此区分“本地/在线”）
+pub fn mark_online_downloaded(conn: &Connection, kind: &str, rid: &str, track_id: i64) {
     let _ = conn.execute(
-        "UPDATE online_tracks SET downloaded = 1 WHERE kind = ?1 AND rid = ?2",
-        params![kind, rid],
+        "UPDATE online_tracks SET downloaded = 1, downloaded_track_id = ?3 WHERE kind = ?1 AND rid = ?2",
+        params![kind, rid, track_id],
+    );
+}
+
+/// 已下载到本地的在线曲目：rid → 资料库曲目 id（用于前端区分本地/在线并优先本地播放）
+pub fn downloaded_online_map(conn: &Connection, kind: &str) -> Vec<(String, i64)> {
+    let mut stmt = match conn.prepare(
+        "SELECT rid, downloaded_track_id FROM online_tracks
+         WHERE kind = ?1 AND downloaded = 1 AND downloaded_track_id > 0",
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[db] 读取已下载在线曲目失败 (kind={kind}): {e}");
+            return vec![];
+        }
+    };
+    stmt.query_map(params![kind], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+}
+
+/// 仅确保在线条目存在（INSERT OR IGNORE），不触碰喜欢/播放统计。
+/// 下载未播放过的曲目时，下载标记必须有行可更新，否则会静默丢失。
+pub fn ensure_online_track(
+    conn: &Connection,
+    kind: &str,
+    rid: &str,
+    title: &str,
+    artist: &str,
+    album: &str,
+    cover: &str,
+    duration_ms: i64,
+    media_mid: &str,
+) {
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO online_tracks(kind, rid, title, artist, album, cover, duration_ms, media_mid)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+        params![kind, rid, title, artist, album, cover, duration_ms, media_mid],
     );
 }
 

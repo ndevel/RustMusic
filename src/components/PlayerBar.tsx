@@ -237,6 +237,15 @@ export default function PlayerBar({ centered = false }: { centered?: boolean }) 
                 )}
                 <div className="text-[12px] text-[var(--ink-3)] truncate mt-1 flex items-center gap-2">
                   <span className="truncate">{current.artist}</span>
+                  {current.kind === "navidrome" && (
+                    <span
+                      className="shrink-0 text-[9.5px] font-medium px-1.5 py-px rounded"
+                      style={{ background: "var(--shade-strong)" }}
+                      title="正在播放 Navidrome 在线流（已下载的曲目会直接播放本地文件）"
+                    >
+                      Navidrome 在线
+                    </span>
+                  )}
                   {current.quality && (
                     <span
                       className="shrink-0 text-[9.5px] font-semibold px-1.5 py-px rounded text-[var(--accent-strong)]"

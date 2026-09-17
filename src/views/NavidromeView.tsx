@@ -19,6 +19,7 @@ function NdResults({
   searched,
   current,
   playing,
+  isLocal,
   onPlay,
   onMenu,
   sentinel,
@@ -28,11 +29,14 @@ function NdResults({
   searched: boolean;
   current: CurrentTrack | null;
   playing: boolean;
-  onPlay: (i: number) => void;
+  /** 该曲目是否已下载到本地（决定“本地/在线”标记与本地播放高亮） */
+  isLocal: (song: NdSong) => boolean;
+  onPlay: (song: NdSong) => void;
   onMenu: (e: React.MouseEvent, row: NdSong) => void;
   sentinel: React.RefObject<HTMLDivElement>;
 }) {
   const togglePlay = useStore((s) => s.togglePlay);
+  const ndLocal = useStore((s) => s.ndLocal);
   return (
     <>
       {results.length > 0 && (
@@ -46,7 +50,11 @@ function NdResults({
       )}
 
       {results.map((t, i) => {
-        const active = current?.kind === "navidrome" && current.ndid === t.id;
+        const local = isLocal(t);
+        // 播放中的是“该曲目的本地文件”时同样高亮（本地播放时 kind 为 track）
+        const active =
+          (current?.kind === "navidrome" && current.ndid === t.id) ||
+          (local && current?.kind === "track" && current.id === ndLocal[t.id]);
         return (
           <div
             key={`${t.id}-${i}`}
@@ -54,7 +62,7 @@ function NdResults({
               active ? "" : "hover:bg-[var(--shade-hover)]"
             }`}
             style={active ? { background: "var(--accent-weak)" } : undefined}
-            onDoubleClick={() => onPlay(i)}
+            onDoubleClick={() => onPlay(t)}
             onContextMenu={(e) => onMenu(e, t)}
           >
             <div className="flex items-center justify-center">
@@ -70,7 +78,7 @@ function NdResults({
                   active ? "flex" : "hidden group-hover:flex"
                 }`}
                 style={{ background: "var(--accent)", color: "var(--bg)" }}
-                onClick={() => (active && playing ? togglePlay() : onPlay(i))}
+                onClick={() => (active && playing ? togglePlay() : onPlay(t))}
                 title="播放"
               >
                 <Play size={13} fill="currentColor" />
@@ -84,12 +92,28 @@ function NdResults({
                 className="w-9 h-9 rounded-lg shrink-0"
               />
               <div className="min-w-0">
-                <div
-                  className={`text-[13px] truncate ${
-                    active ? "font-semibold" : "text-[var(--ink)]"
-                  }`}
-                >
-                  {t.title}
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={`text-[13px] truncate ${
+                      active ? "font-semibold" : "text-[var(--ink)]"
+                    }`}
+                  >
+                    {t.title}
+                  </span>
+                  <span
+                    className="shrink-0 text-[9.5px] px-1.5 py-0.5 rounded font-medium"
+                    style={
+                      local
+                        ? { background: "var(--accent-weak)", color: "var(--accent)" }
+                        : {
+                            background: "var(--shade-strong)",
+                            color: "var(--ink-3)",
+                          }
+                    }
+                    title={local ? "已下载到本地，播放本地文件" : "在线播放（需连接服务器）"}
+                  >
+                    {local ? "本地" : "在线"}
+                  </span>
                 </div>
                 <div className="text-[11px] text-[var(--ink-3)] truncate">
                   {t.artist}
@@ -151,17 +175,22 @@ export default function NavidromeView() {
   const ndResults = useStore((s) => s.ndResults);
   const ndSearching = useStore((s) => s.ndSearching);
   const ndSearched = useStore((s) => s.ndSearched);
+  const ndLocal = useStore((s) => s.ndLocal);
+  const tracks = useStore((s) => s.tracks);
   const current = useStore((s) => s.current);
   const playing = useStore((s) => s.playing);
   const playNd = useStore((s) => s.playNd);
   const playNext = useStore((s) => s.playNext);
   const addToQueue = useStore((s) => s.addToQueue);
+  const ndQueueItem = useStore((s) => s.ndQueueItem);
   const ndSearch = useStore((s) => s.ndSearch);
   const ndSaveConfig = useStore((s) => s.ndSaveConfig);
   const ndLogout = useStore((s) => s.ndLogout);
+  const downloadOnline = useStore((s) => s.downloadOnline);
   const toast = useStore((s) => s.toast);
 
   const [kw, setKw] = useState("");
+  const [scope, setScope] = useState<"all" | "online" | "local">("all");
   const [menu, setMenu] = useState<{ x: number; y: number; row: NdSong } | null>(
     null
   );
@@ -226,6 +255,47 @@ export default function NavidromeView() {
     e.preventDefault();
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, row });
+  };
+
+  // 本地判定：有映射记录且对应曲目仍在资料库（未被软删除）；文件被删则回落在线播放
+  const isLocal = useMemo(() => {
+    const alive = new Set(tracks.filter((t) => !t.missing).map((t) => t.id));
+    return (song: NdSong) => {
+      const tid = ndLocal[song.id];
+      return !!tid && alive.has(tid);
+    };
+  }, [ndLocal, tracks]);
+
+  const localCount = useMemo(
+    () => ndResults.filter((t) => isLocal(t)).length,
+    [ndResults, isLocal]
+  );
+  const onlineCount = ndResults.length - localCount;
+  const shown = useMemo(
+    () =>
+      scope === "all"
+        ? ndResults
+        : ndResults.filter((t) => (scope === "local") === isLocal(t)),
+    [ndResults, scope, isLocal]
+  );
+
+  /** 播放：已下载的走本地文件，其余走在线流（队列由 store 统一决定） */
+  const playSong = (song: NdSong) => {
+    const i = ndResults.findIndex((x) => x.id === song.id);
+    playNd(ndResults, Math.max(0, i));
+  };
+
+  const download = async (row: NdSong) => {
+    await downloadOnline({
+      kind: "navidrome",
+      id: row.id,
+      name: row.title,
+      artist: row.artist,
+      album: row.album,
+      cover: row.cover,
+      durationMs: row.durationMs,
+      suffix: row.suffix,
+    });
   };
 
   // ---------- 未连接：连接配置表单 ----------
@@ -329,8 +399,42 @@ export default function NavidromeView() {
           </div>
           <div className="text-[11.5px] text-[var(--ink-3)] mt-0.5">
             自建音乐库 · {ndUser}
+            {ndResults.length > 0 && (
+              <span className="ml-2">
+                在线 {onlineCount} · 本地 {localCount}
+              </span>
+            )}
           </div>
         </div>
+
+        {/* 区分在线 / 本地：三态筛选 */}
+        {ndResults.length > 0 && (
+          <div
+            className="h-10 px-1 rounded-xl flex items-center gap-1 shrink-0"
+            style={{ background: "var(--shade)" }}
+          >
+            {(
+              [
+                ["all", `全部 ${ndResults.length}`],
+                ["online", `在线 ${onlineCount}`],
+                ["local", `本地 ${localCount}`],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                className={`h-8 px-3 rounded-lg text-[12px] transition-colors ${
+                  scope === key
+                    ? "font-semibold text-[var(--ink)]"
+                    : "text-[var(--ink-2)] hover:text-[var(--ink)]"
+                }`}
+                style={scope === key ? { background: "var(--accent-weak)" } : undefined}
+                onClick={() => setScope(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex-1 min-w-[280px] max-w-[420px] flex items-center gap-2">
           <div
@@ -374,12 +478,13 @@ export default function NavidromeView() {
       {/* 结果列表 */}
       <div className="flex-1 min-h-0 overflow-y-auto px-7 pb-8">
         <NdResults
-          results={ndResults}
+          results={shown}
           searching={ndSearching}
           searched={ndSearched}
           current={current}
           playing={playing}
-          onPlay={(i) => playNd(ndResults, i)}
+          isLocal={isLocal}
+          onPlay={playSong}
           onMenu={openMenu}
           sentinel={sentinel}
         />
@@ -400,41 +505,44 @@ export default function NavidromeView() {
           >
             {(
               [
-                [
-                  "play",
-                  "播放",
-                  () =>
-                    playNd(
-                      ndResults,
-                      Math.max(
-                        0,
-                        ndResults.findIndex((x) => x.id === menu.row.id)
-                      )
-                    ),
-                ],
+                ["play", "播放", () => playSong(menu.row)],
                 [
                   "next",
                   "下一首播放",
-                  () => playNext({ kind: "navidrome", id: menu.row.id }),
+                  () => playNext(ndQueueItem(menu.row)),
                 ],
                 [
                   "queue",
                   "加入队列",
-                  () => addToQueue({ kind: "navidrome", id: menu.row.id }),
+                  () => addToQueue(ndQueueItem(menu.row)),
+                ],
+                [
+                  "download",
+                  menu && isLocal(menu.row) ? "已下载到本地" : "下载到本地",
+                  () => void download(menu!.row),
                 ],
               ] as const
-            ).map(([key, label, fn]) => (
-              <button
-                key={key}
-                className="w-full px-3 py-2 text-left text-[12.5px] text-[var(--ink)] hover:bg-[var(--shade-hover)]"
-                onClick={() => {
-                  fn();
-                  setMenu(null);
-                }}
-              >
-                {label}
-              </button>
-            ))}
+            ).map(([key, label, fn]) => {
+              const done = key === "download" && !!menu && isLocal(menu.row);
+              return (
+                <button
+                  key={key}
+                  disabled={done}
+                  className={`w-full px-3 py-2 text-left text-[12.5px] ${
+                    done
+                      ? "text-[var(--ink-3)] cursor-default"
+                      : "text-[var(--ink)] hover:bg-[var(--shade-hover)]"
+                  }`}
+                  onClick={() => {
+                    if (done) return;
+                    fn();
+                    setMenu(null);
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </>
       )}

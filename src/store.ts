@@ -100,6 +100,8 @@ interface Store {
   ndSearching: boolean;
   ndSearched: boolean;
   ndCache: Record<string, NdSong>;
+  /** 已下载到本地的 Navidrome 曲目：rid → 资料库曲目 id（区分“本地/在线”并优先本地播放） */
+  ndLocal: Record<string, number>;
 
   quality: string;
   /** 关闭主窗口行为：tray = 最小化到托盘（默认）；exit = 直接退出应用 */
@@ -213,6 +215,10 @@ interface Store {
   ndLogout(): Promise<void>;
   ndSearch(kw: string, append?: boolean): Promise<void>;
   playNd(list: NdSong[], idx: number): void;
+  /** 刷新“已下载到本地”的 Navidrome 曲目映射 */
+  refreshNdLocal(): Promise<void>;
+  /** Navidrome 曲目的播放项：已下载且文件在库 → 本地曲目；否则 → 在线流 */
+  ndQueueItem(song: NdSong): QueueItem;
 
   setQuality(q: string): void;
   setCloseAction(a: "tray" | "exit"): void;
@@ -241,6 +247,8 @@ interface Store {
     cover: string;
     durationMs: number;
     mediaMid?: string;
+    /** Navidrome 曲目的原始格式后缀（决定落盘扩展名） */
+    suffix?: string;
   }): Promise<void>;
   refreshLikedOnline(): Promise<void>;
   refreshRecentOnline(): Promise<void>;
@@ -386,6 +394,7 @@ export const useStore = create<Store>((set, get) => ({
   ndSearching: false,
   ndSearched: false,
   ndCache: {},
+  ndLocal: {},
 
   quality: "high",
   closeAction: "tray",
@@ -1263,7 +1272,19 @@ export const useStore = create<Store>((set, get) => ({
         ndUrl: c.url,
         ndUser: c.user,
       });
+      if (c.url && c.user && c.hasPass) await get().refreshNdLocal();
     } catch {}
+  },
+
+  async refreshNdLocal() {
+    try {
+      const list = await api.downloadedOnlineMap("navidrome");
+      const map: Record<string, number> = {};
+      for (const e of list) map[e.rid] = e.trackId;
+      set({ ndLocal: map });
+    } catch {
+      // 未连接或查询失败：保持空映射（列表全按在线处理）
+    }
   },
 
   async ndSaveConfig(url, user, pass) {
@@ -1320,7 +1341,8 @@ export const useStore = create<Store>((set, get) => ({
     if (!list.length) return;
     const cache = { ...get().ndCache };
     for (const t of list) cache[t.id] = t;
-    const queue: QueueItem[] = list.map((t) => ({ kind: "navidrome", id: t.id }));
+    // 已下载到本地的曲目走本地文件播放，其余走在线流
+    const queue: QueueItem[] = list.map((t) => get().ndQueueItem(t));
     const target = Math.max(0, Math.min(idx, queue.length - 1));
     set((s) => ({
       ndCache: cache,
@@ -1329,6 +1351,16 @@ export const useStore = create<Store>((set, get) => ({
       history: [...s.history.slice(-50), s.qIndex],
     }));
     get().playQueueIndex(target);
+  },
+
+  ndQueueItem(song) {
+    const tid = get().ndLocal[song.id];
+    if (tid) {
+      // 本地文件仍在资料库（未被软删除）时才用本地播放，避免文件被删后无法播放
+      const local = get().tracks.find((t) => t.id === tid && !t.missing);
+      if (local) return { kind: "track", id: local.id };
+    }
+    return { kind: "navidrome", id: song.id };
   },
 
   async qqSearch(kw, append = false) {
@@ -1450,8 +1482,11 @@ export const useStore = create<Store>((set, get) => ({
         coverUrl: row.cover,
         durationMs: row.durationMs,
         mediaMid: row.mediaMid ?? "",
+        suffix: row.suffix ?? "",
       });
       await get().refreshTracks();
+      // Navidrome：刷新“本地/在线”映射，下载完即可直接播本地文件
+      if (row.kind === "navidrome") await get().refreshNdLocal();
       get().toast(`已下载到资料库：${name}`, "success");
     } catch (e) {
       get().toast(String(e), "error");

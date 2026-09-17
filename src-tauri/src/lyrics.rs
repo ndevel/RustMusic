@@ -204,6 +204,22 @@ pub fn yrc_to_enhanced_lrc(yrc: &str) -> Option<String> {
     Some(out)
 }
 
+/// 把解析后的歌词还原为 LRC 文本（下载写标签用）。
+/// 同步行带 [mm:ss.cc] 时间标签，非同步行按纯文本输出。
+pub fn to_lrc(payload: &LyricsPayload) -> String {
+    let mut out = String::new();
+    for line in &payload.lines {
+        if line.text.trim().is_empty() {
+            continue;
+        }
+        match line.time_ms {
+            Some(ms) => out.push_str(&format!("[{}]{}\n", fmt_lrc_time(ms), line.text)),
+            None => out.push_str(&format!("{}\n", line.text)),
+        }
+    }
+    out
+}
+
 /// 毫秒 → LRC 时间 mm:ss.cc（百分秒，yrc/QRC 原始精度 10ms）
 pub fn fmt_lrc_time(ms: u64) -> String {
     let csec = ms / 10;
@@ -443,5 +459,23 @@ mod tests {
         let p = parse("[offset:500]\n[00:01.00]<00:01.00>你");
         let ws = p.lines[0].words.as_ref().unwrap();
         assert_eq!(ws[0].start_ms, 1500);
+    }
+
+    #[test]
+    fn to_lrc_roundtrip_keeps_timing_and_plain_lines() {
+        let payload = LyricsPayload {
+            synced: true,
+            lines: vec![
+                LyricLine { time_ms: Some(61_234), text: "第一句".into(), words: None },
+                LyricLine { time_ms: None, text: "纯文本行".into(), words: None },
+                LyricLine { time_ms: Some(0), text: "   ".into(), words: None },
+            ],
+        };
+        let lrc = to_lrc(&payload);
+        assert_eq!(lrc, "[1:01.23]第一句\n纯文本行\n");
+        let back = parse(&lrc);
+        assert_eq!(back.lines.len(), 2);
+        assert_eq!(back.lines[0].time_ms, Some(61_230));
+        assert!(back.synced);
     }
 }

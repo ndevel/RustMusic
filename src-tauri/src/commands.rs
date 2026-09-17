@@ -858,7 +858,7 @@ pub async fn qq_logout(state: State<'_, AppState>) -> Result<(), String> {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OnlineSaveReq {
-    pub kind: String, // netease | qq
+    pub kind: String, // netease | qq | navidrome
     pub id: String,
     pub title: String,
     #[serde(default)]
@@ -871,6 +871,9 @@ pub struct OnlineSaveReq {
     pub duration_ms: u64,
     #[serde(default)]
     pub media_mid: String,
+    /// Navidrome 曲目的原始格式后缀（search3 的 suffix，决定落盘扩展名）
+    #[serde(default)]
+    pub suffix: String,
 }
 
 fn save_dir(state: &State<AppState>) -> std::path::PathBuf {
@@ -971,6 +974,12 @@ pub async fn download_online(
             )?;
             (u, ext)
         }
+        "navidrome" => {
+            let cfg = nd_config(&state)?;
+            let ext = req.suffix.trim().trim_start_matches('.').to_lowercase();
+            let ext = if ext.is_empty() { "mp3".to_string() } else { ext };
+            (crate::navidrome::stream_url(&cfg, &req.id), ext)
+        }
         _ => return Err("未知音源类型".into()),
     };
 
@@ -1040,6 +1049,11 @@ pub async fn download_online(
         .ok()
         .flatten(),
         "qq" => crate::qq::lyric(&req.id).ok().flatten(),
+        "navidrome" => nd_config(&state)
+            .ok()
+            .and_then(|cfg| crate::navidrome::lyric(&cfg, &req.id).ok().flatten())
+            .map(|p| crate::lyrics::to_lrc(&p))
+            .filter(|s| !s.trim().is_empty()),
         _ => None,
     };
     write_tags(&dest, &title, &req.artist, &req.album, &req.cover_url, lyrics.as_deref());
@@ -1053,7 +1067,22 @@ pub async fn download_online(
     {
         let conn = state.db.lock();
         db::upsert_track(&conn, &track);
-        db::mark_online_downloaded(&conn, &req.kind, &req.id);
+        // 条目可能从未播放/收藏过：先确保有行，否则下载标记会静默丢失
+        db::ensure_online_track(
+            &conn,
+            &req.kind,
+            &req.id,
+            &title,
+            &req.artist,
+            &req.album,
+            &req.cover_url,
+            req.duration_ms as i64,
+            &req.media_mid,
+        );
+        // 记录对应的本地曲目 id：前端据此区分“本地/在线”，并优先播放本地文件
+        // （track.path 已是 normalize 后的入库路径，直接查即可）
+        let track_id = db::track_id_by_path(&conn, &track.path).unwrap_or(0);
+        db::mark_online_downloaded(&conn, &req.kind, &req.id, track_id);
         let _ = db::add_folder(&conn, &dir.to_string_lossy());
     }
     Ok(name)
@@ -1108,6 +1137,20 @@ pub async fn recent_online_list(
             last_played: e.last_played,
             liked_at: 0,
         })
+        .collect())
+}
+
+/// 已下载到本地的在线曲目映射（rid → 资料库曲目 id）：
+/// 前端据此给列表打「本地/在线」标记，并优先播放本地文件
+#[tauri::command]
+pub async fn downloaded_online_map(
+    state: State<'_, AppState>,
+    kind: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.db.lock();
+    Ok(db::downloaded_online_map(&conn, &kind)
+        .into_iter()
+        .map(|(rid, track_id)| json!({ "rid": rid, "trackId": track_id }))
         .collect())
 }
 
