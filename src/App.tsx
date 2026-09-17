@@ -14,6 +14,7 @@ import PlaylistDetail from "./views/PlaylistDetail";
 import SourcesView from "./views/SourcesView";
 import SettingsView from "./views/SettingsView";
 import OnlineLibraryView from "./views/NeteaseView";
+import NavidromeView from "./views/NavidromeView";
 import { coverSrc } from "./api";
 import { extractColor } from "./utils";
 
@@ -215,6 +216,7 @@ export default function App() {
               {view === "sources" && <SourcesView />}
               {view === "netease" && <OnlineLibraryView source="netease" />}
               {view === "qq" && <OnlineLibraryView source="qq" />}
+              {view === "navidrome" && <NavidromeView />}
               {view === "settings" && <SettingsView />}
             </div>
           </main>

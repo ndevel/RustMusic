@@ -38,6 +38,16 @@ function queueLabel(item: QueueItem): { title: string; artist: string; cover?: s
       };
     return { title: `QQ音乐 #${item.id}`, artist: "在线曲库" };
   }
+  if (item.kind === "navidrome") {
+    const t = s.ndCache[item.id];
+    if (t)
+      return {
+        title: t.title,
+        artist: t.artist || "Navidrome",
+        cover: t.cover || undefined,
+      };
+    return { title: `Navidrome #${item.id}`, artist: "自建音乐库" };
+  }
   const src = s.sources.find((x) => x.id === item.id);
   return {
     title: src?.title || src?.url.split("/").pop() || "在线音源",

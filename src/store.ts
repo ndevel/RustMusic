@@ -25,6 +25,7 @@ import type {
   NeteaseTrack,
   PlayState,
   QqSong,
+  NdSong,
   Playlist,
   QueueItem,
   RepeatMode,
@@ -89,6 +90,16 @@ interface Store {
   qqLoggedIn: boolean;
   qqNickname: string;
   qqCache: Record<string, QqSong>;
+
+  // Navidrome（自建音乐库，Subsonic API）
+  ndConfigured: boolean;
+  ndServer: string;
+  ndUrl: string;
+  ndUser: string;
+  ndResults: NdSong[];
+  ndSearching: boolean;
+  ndSearched: boolean;
+  ndCache: Record<string, NdSong>;
 
   quality: string;
   /** 关闭主窗口行为：tray = 最小化到托盘（默认）；exit = 直接退出应用 */
@@ -194,6 +205,14 @@ interface Store {
   qqSetLogin(loggedIn: boolean, nickname: string): void;
   qqLogout(): Promise<void>;
   playQq(list: QqSong[], idx: number): void;
+
+  // Navidrome
+  ndLoadConfig(): Promise<void>;
+  /** 保存并验证连接配置，成功返回服务器名称 */
+  ndSaveConfig(url: string, user: string, pass: string): Promise<string>;
+  ndLogout(): Promise<void>;
+  ndSearch(kw: string, append?: boolean): Promise<void>;
+  playNd(list: NdSong[], idx: number): void;
 
   setQuality(q: string): void;
   setCloseAction(a: "tray" | "exit"): void;
@@ -358,6 +377,15 @@ export const useStore = create<Store>((set, get) => ({
   qqNickname: "",
   qqCache: {},
 
+  ndConfigured: false,
+  ndServer: "",
+  ndUrl: "",
+  ndUser: "",
+  ndResults: [],
+  ndSearching: false,
+  ndSearched: false,
+  ndCache: {},
+
   quality: "high",
   closeAction: "tray",
   autoUpdate: true,
@@ -387,6 +415,8 @@ export const useStore = create<Store>((set, get) => ({
     initPromise = (async () => {
     // 播放页歌词自定义配色（CSS 变量），启动即恢复
     applyLyricsColors(get().lyricsColors);
+    // Navidrome 连接配置（未配置时静默）
+    void get().ndLoadConfig();
     unbinds.push(
       await listenEvent<PlayState>("player://state", (p) => {
         const liked =
@@ -409,6 +439,7 @@ export const useStore = create<Store>((set, get) => ({
             durationMs: p.durationMs,
             nid: p.nid ?? null,
             qid: p.qid ?? null,
+            ndid: p.ndid ?? null,
             quality: p.quality ?? null,
             liked,
           },
@@ -422,9 +453,11 @@ export const useStore = create<Store>((set, get) => ({
             ? `track-${p.id}`
             : p.kind === "netease" && p.nid != null
               ? `net-${p.nid}`
-              : p.kind === "qq" && p.qid != null
-                ? `qq-${p.qid}`
-                : null;
+              : p.kind === "navidrome" && p.ndid != null
+                ? `nd-${p.ndid}`
+                : p.kind === "qq" && p.qid != null
+                  ? `qq-${p.qid}`
+                  : null;
         if (key) get().loadLyricsByKey(key);
         // 换曲开播：在线曲目更新“最近播放”（本地曲目由 refreshTracks 的 lastPlayed 体现）
         if (isFreshStart && p.kind !== "track") get().refreshRecentOnline();
@@ -822,7 +855,26 @@ export const useStore = create<Store>((set, get) => ({
         })
         .then(ok)
         .catch((e) => fail(String(e)));
-    } else {
+    } else if (item.kind === "navidrome") {
+      // narrows item.id to string
+      const t = get().ndCache[item.id];
+      if (!t) {
+        fail("曲目信息已失效");
+        return;
+      }
+      api
+        .navidromePlay({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          cover: t.cover,
+          durationMs: t.durationMs,
+        })
+        .then(ok)
+        .catch((e) => fail(String(e)));
+      return;
+    } else if (item.kind === "url") {
       api.playSource(item.id).then(ok).catch((e) => fail(String(e)));
     }
   },
@@ -1194,6 +1246,85 @@ export const useStore = create<Store>((set, get) => ({
     get().playQueueIndex(target);
   },
 
+  // ---------- Navidrome（自建音乐库） ----------
+
+  async ndLoadConfig() {
+    try {
+      const c = await api.navidromeGetConfig();
+      set({
+        ndConfigured: !!(c.url && c.user && c.hasPass),
+        ndServer: c.serverName,
+        ndUrl: c.url,
+        ndUser: c.user,
+      });
+    } catch {}
+  },
+
+  async ndSaveConfig(url, user, pass) {
+    const server = await api.navidromeSaveConfig(url, user, pass);
+    set({
+      ndConfigured: true,
+      ndServer: server.serverName,
+      ndUrl: url.trim().replace(/\/+$/, ""),
+      ndUser: user.trim(),
+    });
+    return server.serverName;
+  },
+
+  async ndLogout() {
+    try {
+      await api.navidromeLogout();
+      set({
+        ndConfigured: false,
+        ndServer: "",
+        ndResults: [],
+        ndSearched: false,
+      });
+      get().toast("已断开 Navidrome 服务器", "success");
+    } catch (e) {
+      get().toast(String(e), "error");
+    }
+  },
+
+  async ndSearch(kw, append = false) {
+    const keyword = kw.trim();
+    if (!keyword) return;
+    if (append && get().loadMoreLock) return;
+    set({ ndSearching: true, ndSearched: true });
+    try {
+      if (append) set({ loadMoreLock: true });
+      const offset = append ? get().ndResults.length : 0;
+      const songs = await api.navidromeSearch(keyword, offset);
+      const cache = { ...get().ndCache };
+      for (const t of songs) cache[t.id] = t;
+      set((s) => ({
+        ndResults: append ? [...s.ndResults, ...songs] : songs,
+        ndSearching: false,
+        ndCache: cache,
+      }));
+    } catch (e) {
+      set({ ndSearching: false });
+      get().toast(String(e), "error");
+    } finally {
+      set({ loadMoreLock: false });
+    }
+  },
+
+  playNd(list, idx) {
+    if (!list.length) return;
+    const cache = { ...get().ndCache };
+    for (const t of list) cache[t.id] = t;
+    const queue: QueueItem[] = list.map((t) => ({ kind: "navidrome", id: t.id }));
+    const target = Math.max(0, Math.min(idx, queue.length - 1));
+    set((s) => ({
+      ndCache: cache,
+      queue,
+      qIndex: target,
+      history: [...s.history.slice(-50), s.qIndex],
+    }));
+    get().playQueueIndex(target);
+  },
+
   async qqSearch(kw, append = false) {
     const keyword = kw.trim();
     if (!keyword) return;
@@ -1535,9 +1666,11 @@ export const useStore = create<Store>((set, get) => ({
       const payload =
         kind === "net"
           ? await api.neteaseLyric(Number(id))
-          : kind === "qq"
-            ? await api.qqLyric(id)
-            : await api.getLyrics(Number(id));
+          : kind === "nd"
+            ? await api.navidromeLyric(id)
+            : kind === "qq"
+              ? await api.qqLyric(id)
+              : await api.getLyrics(Number(id));
       if (get().lyricsFor === key) {
         set({ lyrics: payload, lyricsLoading: false });
         pushDesktopLyrics(get());

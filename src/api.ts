@@ -82,6 +82,25 @@ export const api = {
     invoke<{ status: string; nickname?: string }>("qq_qr_check", { qrsig }),
   qqStatus: () => invoke<{ loggedIn: boolean; nickname: string }>("qq_status"),
   qqLogout: () => invoke<void>("qq_logout"),
+  // ---------- Navidrome（自建音乐库，Subsonic API） ----------
+  navidromeGetConfig: () =>
+    invoke<{ url: string; user: string; hasPass: boolean; serverName: string }>(
+      "navidrome_get_config"
+    ),
+  navidromeSaveConfig: (url: string, user: string, pass: string) =>
+    invoke<{ serverName: string }>("navidrome_save_config", { url, user, pass }),
+  navidromeLogout: () => invoke<void>("navidrome_logout"),
+  navidromeSearch: (keyword: string, offset: number) =>
+    invoke<import("./types").NdSong[]>("navidrome_search", { keyword, offset }),
+  navidromePlay: (track: {
+    id: string;
+    title: string;
+    artist: string;
+    album: string;
+    cover: string;
+    durationMs: number;
+  }) => invoke<void>("navidrome_play", { track }),
+  navidromeLyric: (id: string) => invoke<LyricsPayload>("navidrome_lyric", { id }),
   neteaseLikeList: () => invoke<number[]>("netease_like_list"),
   neteaseLike: (id: number, like: boolean) =>
     invoke<void>("netease_like", { id, like }),

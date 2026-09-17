@@ -50,15 +50,17 @@ export default function NowPlaying() {
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const lastActiveRef = useRef(-1);
 
-  // 歌词键：本地曲目 / 网易云在线曲目
+  // 歌词键：本地曲目 / 在线曲目（网易云 / QQ / Navidrome）
   const lyricsKey =
     current?.kind === "track" && current.id != null
       ? `track-${current.id}`
       : current?.kind === "netease" && current.nid != null
         ? `net-${current.nid}`
-        : current?.kind === "qq" && current.qid != null
-          ? `qq-${current.qid}`
-          : null;
+        : current?.kind === "navidrome" && current.ndid != null
+          ? `nd-${current.ndid}`
+          : current?.kind === "qq" && current.qid != null
+            ? `qq-${current.qid}`
+            : null;
 
   useEffect(() => {
     if (lyricsKey) {

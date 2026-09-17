@@ -33,7 +33,7 @@ export interface Folder {
 
 export interface PlaylistEntryMeta {
   rowid: number;
-  kind: "local" | "netease" | "qq";
+  kind: "local" | "netease" | "qq" | "navidrome";
   trackId: number | null;
   onlineId: string | null;
   title: string;
@@ -91,7 +91,7 @@ export interface LyricsPayload {
 
 export interface TrackInfo {
   id: number | null;
-  kind: "track" | "url" | "netease" | "qq";
+  kind: "track" | "url" | "netease" | "qq" | "navidrome";
   path: string;
   title: string;
   artist: string;
@@ -100,6 +100,8 @@ export interface TrackInfo {
   durationMs: number;
   nid?: number | null;
   qid?: string | null;
+  /** Navidrome（自建音乐库）曲目的服务器端 id */
+  ndid?: string | null;
   quality?: string | null;
 }
 
@@ -123,6 +125,19 @@ export interface NeteaseTrack {
   fee: number;
 }
 
+/** Navidrome（Subsonic search3）搜索结果中的歌曲 */
+export interface NdSong {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  /** 封面完整 URL（getCoverArt） */
+  cover: string;
+  durationMs: number;
+  suffix: string;
+  bitrate: number;
+}
+
 export interface PlayState extends TrackInfo {
   playing: boolean;
   /** 后端“开播代次”（每次换曲 +1），用于区分开播与暂停/恢复 */
@@ -136,11 +151,11 @@ export interface CurrentTrack extends TrackInfo {
 
 export type RepeatMode = "off" | "all" | "one";
 
-export type QueueItemKind = "track" | "url" | "netease" | "qq";
+export type QueueItemKind = "track" | "url" | "netease" | "qq" | "navidrome";
 
 export type QueueItem =
   | { kind: "track" | "netease" | "url"; id: number }
-  | { kind: "qq"; id: string };
+  | { kind: "qq" | "navidrome"; id: string };
 
 export type ViewName =
   | "library"
@@ -149,6 +164,7 @@ export type ViewName =
   | "sources"
   | "netease"
   | "qq"
+  | "navidrome"
   | "settings"
   | "playlist";
 

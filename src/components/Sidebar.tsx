@@ -8,6 +8,7 @@ import {
   Loader2,
   Plus,
   Radio,
+  Server,
   Settings,
   DiscAlbum,
 } from "lucide-react";
@@ -24,6 +25,7 @@ const NAV: { key: ViewName; label: string; icon: typeof Library }[] = [
   { key: "recent", label: "最近播放", icon: Clock3 },
   { key: "netease", label: "网易云", icon: Cloud },
   { key: "qq", label: "QQ音乐", icon: DiscAlbum },
+  { key: "navidrome", label: "Navidrome", icon: Server },
   { key: "sources", label: "在线音源", icon: Radio },
 ];
 

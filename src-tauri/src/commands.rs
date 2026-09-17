@@ -334,6 +334,7 @@ pub async fn play_track(state: State<'_, AppState>, id: i64) -> Result<(), Strin
         duration_ms: (meta.duration * 1000.0) as u64,
         nid: None,
         qid: None,
+        ndid: None,
         quality: (!local_quality.is_empty()).then_some(local_quality),
     };
     engine_clone(&state).play_file(info)
@@ -360,6 +361,7 @@ pub async fn play_source(state: State<'_, AppState>, id: i64) -> Result<(), Stri
         duration_ms: 0,
         nid: None,
         qid: None,
+        ndid: None,
         quality: None,
     };
     engine_clone(&state).play_url(item.url, info)
@@ -451,6 +453,7 @@ pub async fn netease_play(
         duration_ms: track.duration_ms,
         nid: Some(track.id),
         qid: None,
+        ndid: None,
         quality: Some(quality_label),
     };
     let _ = app; // 事件由引擎发出
@@ -554,6 +557,142 @@ pub async fn netease_logout(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- Navidrome（自建音乐库，Subsonic API） ----------
+
+fn nd_config(state: &State<AppState>) -> Result<crate::navidrome::NdConfig, String> {
+    let conn = state.db.lock();
+    crate::navidrome::load_config(&conn).ok_or_else(|| "尚未连接 Navidrome 服务器".to_string())
+}
+
+#[tauri::command]
+pub async fn navidrome_get_config(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let conn = state.db.lock();
+    let url = db::get_setting(&conn, "navidrome_url").unwrap_or_default();
+    let user = db::get_setting(&conn, "navidrome_user").unwrap_or_default();
+    let pass = db::get_setting(&conn, "navidrome_pass").unwrap_or_default();
+    let server = db::get_setting(&conn, "navidrome_server").unwrap_or_default();
+    Ok(json!({
+        "url": url,
+        "user": user,
+        "hasPass": !pass.is_empty(),
+        "serverName": server,
+    }))
+}
+
+#[tauri::command]
+pub async fn navidrome_save_config(
+    state: State<'_, AppState>,
+    url: String,
+    user: String,
+    pass: String,
+) -> Result<serde_json::Value, String> {
+    let cfg = crate::navidrome::NdConfig {
+        url: url.trim_end_matches('/').to_string(),
+        user,
+        pass,
+    };
+    if cfg.url.is_empty() || cfg.user.is_empty() || cfg.pass.is_empty() {
+        return Err("请填写服务器地址、用户名和密码".to_string());
+    }
+    // 先验证连通性与凭据，再落库
+    let server = crate::navidrome::ping(&cfg)?;
+    {
+        let conn = state.db.lock();
+        db::set_setting(&conn, "navidrome_url", &cfg.url);
+        db::set_setting(&conn, "navidrome_user", &cfg.user);
+        db::set_setting(&conn, "navidrome_pass", &cfg.pass);
+        db::set_setting(&conn, "navidrome_server", &server);
+    }
+    Ok(json!({ "serverName": server }))
+}
+
+#[tauri::command]
+pub async fn navidrome_logout(state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db.lock();
+    db::set_setting(&conn, "navidrome_url", "");
+    db::set_setting(&conn, "navidrome_user", "");
+    db::set_setting(&conn, "navidrome_pass", "");
+    db::set_setting(&conn, "navidrome_server", "");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn navidrome_search(
+    state: State<'_, AppState>,
+    keyword: String,
+    offset: Option<i64>,
+) -> Result<Vec<crate::navidrome::NdSong>, String> {
+    let cfg = nd_config(&state)?;
+    crate::navidrome::search3(&cfg, &keyword, 50, offset.unwrap_or(0))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NdPlayReq {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub album: String,
+    #[serde(default)]
+    pub cover: String,
+    #[serde(default)]
+    pub duration_ms: u64,
+}
+
+#[tauri::command]
+pub async fn navidrome_play(
+    state: State<'_, AppState>,
+    track: NdPlayReq,
+) -> Result<(), String> {
+    let cfg = nd_config(&state)?;
+    let url = crate::navidrome::stream_url(&cfg, &track.id);
+    // 记录到“最近播放”
+    {
+        let conn = state.db.lock();
+        db::record_play_online(
+            &conn,
+            "navidrome",
+            &track.id,
+            &track.title,
+            &track.artist,
+            &track.album,
+            &track.cover,
+            track.duration_ms as i64,
+            "",
+            false,
+        );
+    }
+    let info = TrackInfo {
+        id: None,
+        kind: "navidrome".into(),
+        path: String::new(),
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        cover: track.cover,
+        duration_ms: track.duration_ms,
+        nid: None,
+        qid: None,
+        ndid: Some(track.id),
+        quality: None,
+    };
+    engine_clone(&state).play_url(url, info)
+}
+
+#[tauri::command]
+pub async fn navidrome_lyric(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<LyricsPayload, String> {
+    let cfg = nd_config(&state)?;
+    Ok(crate::navidrome::lyric(&cfg, &id)?.unwrap_or(LyricsPayload {
+        synced: false,
+        lines: vec![],
+    }))
+}
+
 // ---------- QQ 音乐在线曲库 ----------
 
 #[derive(serde::Deserialize)]
@@ -637,6 +776,7 @@ pub async fn qq_play(
         duration_ms: track.duration_ms,
         nid: None,
         qid: Some(track.songmid.clone()),
+        ndid: None,
         quality: Some(quality_label),
     };
     // 记录到“最近播放”（在线曲目元数据轻量入库）

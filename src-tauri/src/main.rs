@@ -7,6 +7,7 @@ mod eq;
 mod library;
 mod lyrics;
 mod models;
+mod navidrome;
 mod netease;
 mod qq;
 mod qrc;
@@ -325,6 +326,12 @@ fn main() {
             commands::netease_like_list,
             commands::netease_like,
             commands::netease_logout,
+            commands::navidrome_get_config,
+            commands::navidrome_save_config,
+            commands::navidrome_logout,
+            commands::navidrome_search,
+            commands::navidrome_play,
+            commands::navidrome_lyric,
             commands::qq_search,
             commands::qq_play,
             commands::qq_lyric,
