@@ -9,6 +9,7 @@ import {
   Shuffle,
   Trash2,
   Cloud,
+  HardDrive,
 } from "lucide-react";
 import { useStore } from "../store";
 import { useDragList } from "../hooks/useDragList";
@@ -29,6 +30,7 @@ type DetailRow =
       cover: string;
       durationMs: number;
       liked: boolean;
+      downloaded: boolean;
     }
   | {
       entry: PlaylistEntryMeta;
@@ -40,6 +42,7 @@ type DetailRow =
       cover: string;
       durationMs: number;
       liked: boolean;
+      downloaded: boolean;
     }
   | {
       entry: PlaylistEntryMeta;
@@ -51,6 +54,19 @@ type DetailRow =
       cover: string;
       durationMs: number;
       liked: boolean;
+      downloaded: boolean;
+    }
+  | {
+      entry: PlaylistEntryMeta;
+      kind: "navidrome";
+      id: string;
+      name: string;
+      artist: string;
+      album: string;
+      cover: string;
+      durationMs: number;
+      liked: boolean;
+      downloaded: boolean;
     };
 
 export default function PlaylistDetail({ id }: { id: number }) {
@@ -69,6 +85,7 @@ export default function PlaylistDetail({ id }: { id: number }) {
   const deletePlaylist = useStore((s) => s.deletePlaylist);
   const current = useStore((s) => s.current);
   const savedOnline = useStore((s) => s.savedOnline);
+  const onlineLocal = useStore((s) => s.onlineLocal);
   const [confirmDel, setConfirmDel] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; e: PlaylistEntryMeta } | null>(
     null
@@ -104,6 +121,7 @@ export default function PlaylistDetail({ id }: { id: number }) {
             cover: t ? t.cover : e.cover,
             durationMs: t ? t.duration * 1000 : e.duration * 1000,
             liked: t?.liked ?? false,
+            downloaded: false,
           };
         }
         if (e.kind === "netease") {
@@ -112,6 +130,16 @@ export default function PlaylistDetail({ id }: { id: number }) {
             kind: "netease",
             id: Number(e.onlineId ?? 0),
             liked: !!savedOnline[`netease-${e.onlineId}`],
+            downloaded: !!onlineLocal[`netease:${e.onlineId}`],
+          };
+        }
+        if (e.kind === "navidrome") {
+          return {
+            ...base,
+            kind: "navidrome",
+            id: e.onlineId ?? "",
+            liked: false,
+            downloaded: !!onlineLocal[`navidrome:${e.onlineId}`],
           };
         }
         return {
@@ -119,9 +147,10 @@ export default function PlaylistDetail({ id }: { id: number }) {
           kind: "qq",
           id: e.onlineId ?? "",
           liked: !!savedOnline[`qq-${e.onlineId}`],
+          downloaded: !!onlineLocal[`qq:${e.onlineId}`],
         };
       });
-  }, [pl, tracks, search, savedOnline]);
+  }, [pl, tracks, search, savedOnline, onlineLocal]);
 
   // 长按拖拽调序：提交时按 rowid 序列重写 position。
   // 搜索过滤时 list 只是可见子集——基于全量 entries 重排（被拖行插到
@@ -298,15 +327,39 @@ export default function PlaylistDetail({ id }: { id: number }) {
                           }`}
                         >
                           <span className="truncate">{r.name}</span>
-                          {r.kind !== "track" && (
+                          {r.kind === "track" && (
+                            <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium shrink-0 flex items-center gap-1">
+                              <HardDrive size={9} />
+                              本地
+                            </span>
+                          )}
+                          {r.kind === "netease" && (
                             <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0 flex items-center gap-1">
                               <Cloud size={9} />
-                              {r.kind === "netease" ? "网易云" : "QQ音乐"}
+                              网易云
+                            </span>
+                          )}
+                          {r.kind === "qq" && (
+                            <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0 flex items-center gap-1">
+                              <Cloud size={9} />
+                              QQ音乐
+                            </span>
+                          )}
+                          {r.kind === "navidrome" && (
+                            <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0 flex items-center gap-1">
+                              <Cloud size={9} />
+                              Navidrome
                             </span>
                           )}
                           {r.kind !== "track" && r.entry.vip && !dead && (
                             <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--accent-weak)] text-[var(--accent-strong)] font-bold shrink-0">
                               VIP
+                            </span>
+                          )}
+                          {r.kind !== "track" && r.downloaded && (
+                            <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium shrink-0 flex items-center gap-1" title="已下载到本地">
+                              <HardDrive size={9} />
+                              已下载
                             </span>
                           )}
                           {dead && (

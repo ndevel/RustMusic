@@ -221,6 +221,7 @@ interface Store {
   playNd(list: NdSong[], idx: number): void;
   /** 刷新“已下载到本地”的 Navidrome 曲目映射 */
   refreshNdLocal(): Promise<void>;
+  refreshOnlineLocal(): Promise<void>;
   /** Navidrome 曲目的播放项：已下载且文件在库 → 本地曲目；否则 → 在线流 */
   ndQueueItem(song: NdSong): QueueItem;
 
@@ -401,6 +402,7 @@ export const useStore = create<Store>((set, get) => ({
   ndSearched: false,
   ndCache: {},
   ndLocal: {},
+  onlineLocal: {},
 
   quality: "high",
   closeAction: "tray",
@@ -595,6 +597,7 @@ export const useStore = create<Store>((set, get) => ({
       if (neteaseStatus.loggedIn) get().neteaseSyncLikes();
       get().refreshLikedOnline();
       get().refreshRecentOnline();
+      get().refreshOnlineLocal();
       get().loadManualOrder("library");
       get().loadManualOrder("liked");
     } catch (e) {
@@ -1309,6 +1312,21 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
+  async refreshOnlineLocal() {
+    try {
+      const [nd, ne, qq] = await Promise.all([
+        api.downloadedOnlineMap("navidrome").catch(() => []),
+        api.downloadedOnlineMap("netease").catch(() => []),
+        api.downloadedOnlineMap("qq").catch(() => []),
+      ]);
+      const map: Record<string, number> = {};
+      for (const e of nd) map[`navidrome:${e.rid}`] = e.trackId;
+      for (const e of ne) map[`netease:${e.rid}`] = e.trackId;
+      for (const e of qq) map[`qq:${e.rid}`] = e.trackId;
+      set({ onlineLocal: map });
+    } catch {}
+  },
+
   async ndSaveConfig(url, user, pass) {
     const server = await api.navidromeSaveConfig(url, user, pass);
     set({
@@ -1517,6 +1535,7 @@ export const useStore = create<Store>((set, get) => ({
       }, downloadId);
       await get().refreshTracks();
       if (row.kind === "navidrome") await get().refreshNdLocal();
+      await get().refreshOnlineLocal();
       get().toast(`已下载到资料库：${name}`, "success");
     } catch (e) {
       if (String(e) !== "下载已取消") get().toast(String(e), "error");

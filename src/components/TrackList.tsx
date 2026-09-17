@@ -1,4 +1,4 @@
-import { Ban, Heart, ListMusic, MoreHorizontal, Play } from "lucide-react";
+import { Ban, Cloud, Heart, ListMusic, MoreHorizontal, Play, HardDrive } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../store";
@@ -68,6 +68,7 @@ export default function TrackList({
   const playNext = useStore((s) => s.playNext);
   const playlists = useStore((s) => s.playlists);
   const unavailable = useStore((s) => s.unavailable);
+  const onlineLocal = useStore((s) => s.onlineLocal);
   const createPlaylist = useStore((s) => s.createPlaylist);
   const [newPlName, setNewPlName] = useState("");
 
@@ -198,6 +199,10 @@ export default function TrackList({
                 }`}
               >
                 {trackTitle(t)}
+              </span>
+              <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium shrink-0 flex items-center gap-1">
+                <HardDrive size={9} />
+                本地
               </span>
               {active && (
                 <span className="shrink-0 inline-flex">
@@ -333,12 +338,19 @@ export default function TrackList({
               >
                 {e.title}
               </span>
-              <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0">
-                {e.kind === "netease" ? "网易云" : "QQ音乐"}
+              <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0 flex items-center gap-1">
+                <Cloud size={9} />
+                {e.kind === "netease" ? "网易云" : e.kind === "navidrome" ? "Navidrome" : "QQ音乐"}
               </span>
               {e.vip && !dead && (
                 <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--accent-weak)] text-[var(--accent-strong)] font-bold shrink-0">
                   VIP
+                </span>
+              )}
+              {onlineLocal[`${e.kind}:${e.onlineId}`] && (
+                <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium shrink-0 flex items-center gap-1" title="已下载到本地">
+                  <HardDrive size={9} />
+                  已下载
                 </span>
               )}
               {dead && (

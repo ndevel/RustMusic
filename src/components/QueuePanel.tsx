@@ -1,4 +1,4 @@
-import { ListMusic, Pause, Play, Trash2, X } from "lucide-react";
+import { Cloud, HardDrive, ListMusic, Pause, Play, Radio, Trash2, X } from "lucide-react";
 import { useStore } from "../store";
 import { fmtTime } from "../utils";
 import CoverImg from "./CoverImg";
@@ -128,12 +128,44 @@ export default function QueuePanel() {
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div
-                  className={`text-[12.5px] truncate ${
-                    active ? "text-[var(--accent-strong)]" : "text-[var(--ink)]"
-                  }`}
-                >
-                  {title}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className={`text-[12.5px] truncate ${
+                      active ? "text-[var(--accent-strong)]" : "text-[var(--ink)]"
+                    }`}
+                  >
+                    {title}
+                  </span>
+                  {item.kind === "track" && (
+                    <span className="text-[8.5px] px-1 py-[1px] rounded bg-emerald-500/15 text-emerald-400 font-medium shrink-0 flex items-center gap-0.5">
+                      <HardDrive size={7} />
+                      本地
+                    </span>
+                  )}
+                  {item.kind === "netease" && (
+                    <span className="text-[8.5px] px-1 py-[1px] rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0 flex items-center gap-0.5">
+                      <Cloud size={7} />
+                      网易云
+                    </span>
+                  )}
+                  {item.kind === "qq" && (
+                    <span className="text-[8.5px] px-1 py-[1px] rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0 flex items-center gap-0.5">
+                      <Cloud size={7} />
+                      QQ音乐
+                    </span>
+                  )}
+                  {item.kind === "navidrome" && (
+                    <span className="text-[8.5px] px-1 py-[1px] rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0 flex items-center gap-0.5">
+                      <Cloud size={7} />
+                      Navidrome
+                    </span>
+                  )}
+                  {item.kind === "url" && (
+                    <span className="text-[8.5px] px-1 py-[1px] rounded bg-[var(--shade-strong)] text-[var(--ink-3)] font-medium shrink-0 flex items-center gap-0.5">
+                      <Radio size={7} />
+                      音源
+                    </span>
+                  )}
                 </div>
                 <div className="text-[11px] text-[var(--ink-3)] truncate mt-0.5">{artist}</div>
               </div>
