@@ -218,6 +218,7 @@ interface Store {
   ndSaveConfig(url: string, user: string, pass: string): Promise<string>;
   ndLogout(): Promise<void>;
   ndSearch(kw: string, append?: boolean): Promise<void>;
+  ndRandom(count?: number): Promise<void>;
   playNd(list: NdSong[], idx: number): void;
   /** 刷新“已下载到本地”的 Navidrome 曲目映射 */
   refreshNdLocal(): Promise<void>;
@@ -1374,6 +1375,19 @@ export const useStore = create<Store>((set, get) => ({
       get().toast(String(e), "error");
     } finally {
       set({ loadMoreLock: false });
+    }
+  },
+
+  async ndRandom(count = 50) {
+    set({ ndSearching: true, ndSearched: true });
+    try {
+      const songs = await api.navidromeRandom(count);
+      const cache = { ...get().ndCache };
+      for (const t of songs) cache[t.id] = t;
+      set({ ndResults: songs, ndSearching: false, ndCache: cache });
+    } catch (e) {
+      set({ ndSearching: false });
+      get().toast(String(e), "error");
     }
   },
 

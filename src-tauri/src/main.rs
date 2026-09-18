@@ -332,6 +332,7 @@ fn main() {
             commands::navidrome_save_config,
             commands::navidrome_logout,
             commands::navidrome_search,
+            commands::navidrome_random,
             commands::navidrome_play,
             commands::navidrome_lyric,
             commands::downloaded_online_map,

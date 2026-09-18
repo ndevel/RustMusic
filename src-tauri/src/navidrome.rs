@@ -145,27 +145,44 @@ pub fn search3(
         .unwrap_or(&empty);
     Ok(songs
         .iter()
-        .map(|s| {
-            let id = s.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let cover_art = s.get("coverArt").and_then(|v| v.as_str()).unwrap_or("");
-            let cover = if cover_art.is_empty() {
-                String::new()
-            } else {
-                cover_url(cfg, cover_art, 600)
-            };
-            NdSong {
-                id,
-                title: s.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                artist: s.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                album: s.get("album").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                cover,
-                duration_ms: (s.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0) * 1000.0)
-                    as u64,
-                suffix: s.get("suffix").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                bitrate: s.get("bitRate").and_then(|v| v.as_i64()).unwrap_or(0),
-            }
-        })
+        .map(|s| parse_nd_song(cfg, s))
         .collect())
+}
+
+/// getRandomSongs：随机获取歌曲列表（登录后默认展示用）
+pub fn get_random_songs(cfg: &NdConfig, count: i64) -> Result<Vec<NdSong>, String> {
+    let root = get_json(cfg, "getRandomSongs", &format!("size={count}"))?;
+    let empty = vec![];
+    let songs = root
+        .get("randomSongs")
+        .and_then(|r| r.get("song"))
+        .and_then(|s| s.as_array())
+        .unwrap_or(&empty);
+    Ok(songs
+        .iter()
+        .map(|s| parse_nd_song(cfg, s))
+        .collect())
+}
+
+fn parse_nd_song(cfg: &NdConfig, s: &serde_json::Value) -> NdSong {
+    let id = s.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let cover_art = s.get("coverArt").and_then(|v| v.as_str()).unwrap_or("");
+    let cover = if cover_art.is_empty() {
+        String::new()
+    } else {
+        cover_url(cfg, cover_art, 600)
+    };
+    NdSong {
+        id,
+        title: s.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        artist: s.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        album: s.get("album").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        cover,
+        duration_ms: (s.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0) * 1000.0)
+            as u64,
+        suffix: s.get("suffix").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        bitrate: s.get("bitRate").and_then(|v| v.as_i64()).unwrap_or(0),
+    }
 }
 
 /// 播放链接（stream 端点，带认证参数的原文件流）

@@ -152,13 +152,13 @@ function NdResults({
         <div className="py-16 text-center">
           <Server size={36} className="mx-auto text-[var(--ink-3)] mb-3" />
           <div className="text-[13px] text-[var(--ink-2)]">
-            输入关键词搜索你 Navidrome 库中的音乐
+            {searching ? "正在加载…" : "输入关键词搜索你 Navidrome 库中的音乐"}
           </div>
         </div>
       )}
 
       <div ref={sentinel} className="h-4" />
-      {searching && results.length > 0 && (
+      {searching && (
         <div className="flex justify-center py-3">
           <Loader2 size={16} className="animate-spin text-[var(--ink-3)]" />
         </div>
@@ -184,6 +184,7 @@ export default function NavidromeView() {
   const addToQueue = useStore((s) => s.addToQueue);
   const ndQueueItem = useStore((s) => s.ndQueueItem);
   const ndSearch = useStore((s) => s.ndSearch);
+  const ndRandom = useStore((s) => s.ndRandom);
   const ndSaveConfig = useStore((s) => s.ndSaveConfig);
   const ndLogout = useStore((s) => s.ndLogout);
   const downloadOnline = useStore((s) => s.downloadOnline);
@@ -215,6 +216,13 @@ export default function NavidromeView() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [menu]);
+
+  // 已连接但尚未搜索/浏览时，默认加载随机歌曲列表
+  useEffect(() => {
+    if (ndConfigured && !ndSearched && !ndSearching) {
+      ndRandom();
+    }
+  }, [ndConfigured, ndSearched, ndSearching, ndRandom]);
 
   const submit = () => ndSearch(kw);
 

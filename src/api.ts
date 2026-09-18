@@ -92,6 +92,8 @@ export const api = {
   navidromeLogout: () => invoke<void>("navidrome_logout"),
   navidromeSearch: (keyword: string, offset: number) =>
     invoke<import("./types").NdSong[]>("navidrome_search", { keyword, offset }),
+  navidromeRandom: (count: number) =>
+    invoke<import("./types").NdSong[]>("navidrome_random", { count }),
   navidromePlay: (track: {
     id: string;
     title: string;

@@ -620,6 +620,15 @@ pub async fn navidrome_search(
     crate::navidrome::search3(&cfg, &keyword, 50, offset.unwrap_or(0))
 }
 
+#[tauri::command]
+pub async fn navidrome_random(
+    state: State<'_, AppState>,
+    count: Option<i64>,
+) -> Result<Vec<crate::navidrome::NdSong>, String> {
+    let cfg = nd_config(&state)?;
+    crate::navidrome::get_random_songs(&cfg, count.unwrap_or(50))
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NdPlayReq {
