@@ -162,10 +162,8 @@ export default function TrackList({
         {/* 序号 / 播放 */}
         <div className="relative h-12 flex items-center justify-center">
           <span
-            className={`text-[12.5px] tabular-nums transition-opacity ${
-              active
-                ? "text-[var(--accent)] font-bold"
-                : "text-[var(--ink-3)] group-hover:opacity-0"
+            className={`text-[12.5px] tabular-nums transition-opacity group-hover:opacity-0 ${
+              active ? "text-[var(--accent)] font-bold" : "text-[var(--ink-3)]"
             }`}
           >
             {String(idxNum + 1).padStart(2, "0")}
@@ -302,10 +300,8 @@ export default function TrackList({
       >
         <div className="relative h-12 flex items-center justify-center">
           <span
-            className={`text-[12.5px] tabular-nums transition-opacity ${
-              active
-                ? "text-[var(--accent)] font-bold"
-                : "text-[var(--ink-3)] group-hover:opacity-0"
+            className={`text-[12.5px] tabular-nums transition-opacity group-hover:opacity-0 ${
+              active ? "text-[var(--accent)] font-bold" : "text-[var(--ink-3)]"
             }`}
           >
             {String(idxNum + 1).padStart(2, "0")}
