@@ -3,6 +3,7 @@ import {
   Loader2,
   MoreHorizontal,
   Play,
+  RefreshCw,
   Search,
   Server,
   Unplug,
@@ -470,6 +471,16 @@ export default function NavidromeView() {
             )}
           </button>
         </div>
+
+        <button
+          className="btn-ghost h-10 px-3.5 rounded-xl flex items-center gap-2 text-[12.5px] text-[var(--ink-2)]"
+          disabled={ndSearching}
+          onClick={() => ndRandom()}
+          title="刷新随机歌曲列表"
+        >
+          <RefreshCw size={15} className={ndSearching ? "animate-spin" : ""} />
+          随机
+        </button>
 
         <button
           className="btn-ghost h-10 px-3.5 rounded-xl flex items-center gap-2 text-[12.5px] text-[var(--ink-2)]"
