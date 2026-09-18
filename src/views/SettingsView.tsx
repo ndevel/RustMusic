@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Check,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -21,6 +22,7 @@ import {
   themeLyricsDefaults,
 } from "../theme";
 import { showUpdateDialog } from "../components/UpdateDialog";
+import { NAV } from "../components/Sidebar";
 
 const EQ_FREQS = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
 
@@ -72,6 +74,8 @@ export default function SettingsView() {
   const setQuality = useStore((s) => s.setQuality);
   const closeAction = useStore((s) => s.closeAction);
   const setCloseAction = useStore((s) => s.setCloseAction);
+  const hiddenNav = useStore((s) => s.hiddenNav);
+  const toggleNav = useStore((s) => s.toggleNav);
   const autoUpdate = useStore((s) => s.autoUpdate);
   const setAutoUpdate = useStore((s) => s.setAutoUpdate);
   const theme = useStore((s) => s.theme);
@@ -320,6 +324,47 @@ export default function SettingsView() {
                 />
               </label>
             </div>
+          </div>
+
+          {/* 左侧导航项显示开关：勾选即显示，取消勾选即隐藏，立即生效 */}
+          <div className="mt-4 pt-4 border-t border-[var(--line)]">
+            <div className="flex items-start gap-4">
+              <span className="text-[12.5px] text-[var(--ink-2)] w-[80px] shrink-0 pt-1">
+                导航项
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {NAV.map(({ key, label, icon: Icon }) => {
+                  const on = !hiddenNav.includes(key);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => toggleNav(key)}
+                      className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[12px] transition-colors border ${
+                        on
+                          ? "text-[var(--ink)] border-transparent"
+                          : "text-[var(--ink-3)] border-[var(--line)] hover:text-[var(--ink-2)] hover:bg-[var(--shade-hover)]"
+                      }`}
+                      style={on ? { background: "var(--accent-weak)" } : undefined}
+                    >
+                      <span
+                        className={`w-3.5 h-3.5 rounded-[3px] border flex items-center justify-center shrink-0 ${
+                          on ? "border-transparent" : "border-[var(--ink-3)]"
+                        }`}
+                        style={on ? { background: "var(--accent)" } : undefined}
+                      >
+                        {on && <Check size={9} strokeWidth={3.5} className="text-[var(--accent-on)]" />}
+                      </span>
+                      <Icon size={12} />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="text-[11.5px] text-[var(--ink-3)] mt-2">
+              勾选后在左侧导航显示，取消勾选即隐藏，立即生效无需重启；设置项始终保留。
+            </p>
           </div>
 
           {/* 桌面歌词开关 */}

@@ -6,8 +6,10 @@ import {
   applyTheme,
   loadAccent,
   loadTheme,
+  loadHiddenNav,
   saveAccent,
   saveTheme,
+  saveHiddenNav,
   loadDesktopLyricsColors,
   saveDesktopLyricsColors,
   type DesktopLyricsColors,
@@ -233,6 +235,8 @@ interface Store {
   refreshCacheBytes(): Promise<void>;
   setTheme(t: "dark" | "light"): void;
   setAccent(key: string): void;
+  hiddenNav: string[];
+  toggleNav(key: string): void;
   toggleLikeOnline(row: {
     kind: string;
     id: string | number;
@@ -419,6 +423,7 @@ export const useStore = create<Store>((set, get) => ({
   playingSourceId: null,
   theme: "light",
   accent: "amber",
+  hiddenNav: loadHiddenNav(),
   savedOnline: {},
   likedOnline: [],
   recentOnline: [],
@@ -1496,6 +1501,13 @@ export const useStore = create<Store>((set, get) => ({
     set({ accent: key });
     saveAccent(key);
     applyAccent(key);
+  },
+
+  toggleNav(key) {
+    const cur = get().hiddenNav;
+    const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+    set({ hiddenNav: next });
+    saveHiddenNav(next);
   },
 
   async toggleLikeOnline(row) {

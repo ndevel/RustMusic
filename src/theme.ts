@@ -232,3 +232,21 @@ export function initTheme() {
   applyTheme(theme);
   applyAccent(loadAccent());
 }
+
+const HIDDEN_NAV_KEY = "rustmusic.hiddenNav";
+
+/** 读取被隐藏的左侧导航项 key（未列入者默认显示） */
+export function loadHiddenNav(): string[] {
+  try {
+    const raw = localStorage.getItem(HIDDEN_NAV_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((k) => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveHiddenNav(keys: string[]) {
+  localStorage.setItem(HIDDEN_NAV_KEY, JSON.stringify(keys));
+}

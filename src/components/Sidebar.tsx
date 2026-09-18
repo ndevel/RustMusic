@@ -12,14 +12,14 @@ import {
   Settings,
   DiscAlbum,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import Logo from "./Logo";
 import { InputModal } from "./Dialogs";
 import CoverImg from "./CoverImg";
 import type { ViewName } from "../types";
 
-const NAV: { key: ViewName; label: string; icon: typeof Library }[] = [
+export const NAV: { key: ViewName; label: string; icon: typeof Library }[] = [
   { key: "library", label: "资料库", icon: Library },
   { key: "liked", label: "我喜欢", icon: Heart },
   { key: "recent", label: "最近播放", icon: Clock3 },
@@ -32,6 +32,7 @@ const NAV: { key: ViewName; label: string; icon: typeof Library }[] = [
 export default function Sidebar() {
   const view = useStore((s) => s.view);
   const viewParam = useStore((s) => s.viewParam);
+  const hiddenNav = useStore((s) => s.hiddenNav);
   const setView = useStore((s) => s.setView);
   const playlists = useStore((s) => s.playlists);
   const scan = useStore((s) => s.scan);
@@ -44,6 +45,12 @@ export default function Sidebar() {
   const totalDuration = tracks.reduce((acc, t) => acc + t.duration, 0);
   const hours = Math.floor(totalDuration / 3600);
   const mins = Math.floor((totalDuration % 3600) / 60);
+
+  // 当前页签被隐藏时，切换到第一个仍可见的导航项（全部隐藏时回到资料库）
+  useEffect(() => {
+    if (!hiddenNav.includes(view)) return;
+    setView(NAV.find((n) => !hiddenNav.includes(n.key))?.key ?? "library");
+  }, [hiddenNav, view, setView]);
 
   return (
     <aside className="w-[236px] shrink-0 flex flex-col px-4 pt-3 relative z-20">
@@ -63,7 +70,7 @@ export default function Sidebar() {
       {/* 导航 + 播放列表（可滚动区） */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-3">
         <nav className="flex flex-col gap-1.5">
-          {NAV.map(({ key, label, icon: Icon }) => {
+          {NAV.filter((n) => !hiddenNav.includes(n.key)).map(({ key, label, icon: Icon }) => {
             const active = view === key;
             return (
               <button
