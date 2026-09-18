@@ -21,6 +21,7 @@ export const api = {
   removeFolder: (id: number) => invoke<void>("remove_folder", { id }),
   rescan: () => invoke<void>("rescan"),
   openFolder: (path: string) => invoke<void>("open_folder", { path }),
+  revealTrackFile: (path: string) => invoke<void>("reveal_track_file", { path }),
   listOutputDevices: () =>
     invoke<{
       devices: { name: string; isDefault: boolean }[];

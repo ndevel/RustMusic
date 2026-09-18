@@ -1,6 +1,7 @@
-import { Ban, Cloud, Heart, ListMusic, MoreHorizontal, Play, HardDrive } from "lucide-react";
+import { Ban, Cloud, FolderOpen, Heart, ListMusic, MoreHorizontal, Play, HardDrive } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { api } from "../api";
 import { useStore } from "../store";
 import { useDragList } from "../hooks/useDragList";
 import type { PlaylistEntryMeta, TrackMeta } from "../types";
@@ -566,6 +567,17 @@ export default function TrackList({
             <Play size={13} /> 加入队列
           </button>
           <div className="my-1 mx-2 border-t border-[var(--line)]" />
+          <button
+            className="w-full h-8 px-2.5 rounded-lg flex items-center gap-2.5 text-[12.5px] text-[var(--ink)] hover:bg-[var(--shade-strong)] text-left"
+            onClick={() => {
+              setMenu(null);
+              api.revealTrackFile(menu.track.path).catch((e) =>
+                useStore.getState().toast(String(e), "error")
+              );
+            }}
+          >
+            <FolderOpen size={13} /> 打开文件所在路径
+          </button>
           <button
             className="w-full h-8 px-2.5 rounded-lg flex items-center gap-2.5 text-[12.5px] text-[var(--ink)] hover:bg-[var(--shade-strong)] text-left"
             onClick={() => {

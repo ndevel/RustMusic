@@ -303,6 +303,7 @@ fn main() {
             commands::remove_folder,
             commands::rescan,
             commands::open_folder,
+            commands::reveal_track_file,
             commands::list_output_devices,
             commands::set_output_device,
             commands::drop_paths,

@@ -88,6 +88,76 @@ pub async fn open_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+#[link(name = "shell32")]
+extern "system" {
+    fn ShellExecuteW(
+        hwnd: *mut std::ffi::c_void,
+        lp_operation: *const u16,
+        lp_file: *const u16,
+        lp_parameters: *const u16,
+        lp_directory: *const u16,
+        n_show_cmd: i32,
+    ) -> isize;
+}
+
+/// 在系统文件管理器中显示曲目所在目录（Windows 下直接选中该文件）
+#[tauri::command]
+pub async fn reveal_track_file(path: String) -> Result<(), String> {
+    let p = std::path::PathBuf::from(&path);
+    if !p.exists() {
+        return Err("文件不存在，可能已被移动或删除".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // 不能用 Command::new("explorer").arg("/select,路径")：路径含空格时
+        // std 会整体加引号，explorer 收到的开关变成 "/select,，无法识别，
+        // 于是退回打开 Documents。改走 ShellExecuteW，参数原样传给 explorer。
+        let wide = |s: &str| -> Vec<u16> {
+            s.encode_utf16().chain(std::iter::once(0)).collect()
+        };
+        let op = wide("open");
+        // 路径含引号时 /select 无法正确解析，退化为只打开所在目录
+        let (file, params) = if path.contains("\"") {
+            let dir = p.parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
+            (wide(&dir), None)
+        } else {
+            (wide("explorer.exe"), Some(wide(&format!("/select,\"{}\"", path))))
+        };
+        let params_ptr = params.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null());
+        let hr = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                op.as_ptr(),
+                file.as_ptr(),
+                params_ptr,
+                std::ptr::null(),
+                1, // SW_SHOWNORMAL
+            )
+        };
+        if hr as i32 <= 32 {
+            return Err("打开文件所在目录失败".into());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| format!("打开文件所在目录失败: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let dir = p.parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| format!("打开文件所在目录失败: {e}"))?;
+    }
+    Ok(())
+}
+
 // ---------- 输出设备 ----------
 
 /// 枚举输出设备 + 当前生效的设备名
