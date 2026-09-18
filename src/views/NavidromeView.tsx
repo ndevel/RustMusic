@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Loader2,
   MoreHorizontal,
@@ -10,7 +11,7 @@ import {
 } from "lucide-react";
 import { useStore } from "../store";
 import type { CurrentTrack, NdSong } from "../types";
-import { fmtTime } from "../utils";
+import { clampMenuPos, fmtTime } from "../utils";
 import CoverImg from "../components/CoverImg";
 
 /** 搜索结果列表（含行内播放按钮 / 右键菜单 / 无限加载哨兵） */
@@ -23,6 +24,7 @@ function NdResults({
   isLocal,
   onPlay,
   onMenu,
+  onMore,
   sentinel,
 }: {
   results: NdSong[];
@@ -30,10 +32,11 @@ function NdResults({
   searched: boolean;
   current: CurrentTrack | null;
   playing: boolean;
-  /** 该曲目是否已下载到本地（决定“本地/在线”标记与本地播放高亮） */
+  /** 该曲目是否已下载到本地（决定"本地/在线"标记与本地播放高亮） */
   isLocal: (song: NdSong) => boolean;
   onPlay: (song: NdSong) => void;
   onMenu: (e: React.MouseEvent, row: NdSong) => void;
+  onMore: (rect: DOMRect, row: NdSong) => void;
   sentinel: React.RefObject<HTMLDivElement>;
 }) {
   const togglePlay = useStore((s) => s.togglePlay);
@@ -79,7 +82,10 @@ function NdResults({
                   active ? "flex" : "hidden group-hover:flex"
                 }`}
                 style={{ background: "var(--accent)", color: "var(--bg)" }}
-                onClick={() => (active && playing ? togglePlay() : onPlay(t))}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  active && playing ? togglePlay() : onPlay(t);
+                }}
                 title="播放"
               >
                 <Play size={13} fill="currentColor" />
@@ -126,8 +132,13 @@ function NdResults({
               {fmtTime(t.durationMs / 1000)}
             </div>
             <button
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--ink-3)] opacity-0 group-hover:opacity-100 hover:text-[var(--ink)] transition-opacity"
-              onClick={(e) => onMenu(e, t)}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--ink-3)] hover:text-[var(--ink)] transition-colors"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                onMore(r, t);
+              }}
               title="更多操作"
             >
               <MoreHorizontal size={16} />
@@ -210,13 +221,9 @@ export default function NavidromeView() {
     }
   }, [ndConfigured, ndUrl, ndUser]);
 
-  // 点击空白处关闭右键菜单
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, [menu]);
+  // 菜单关闭由全屏遮罩（overlay）的 onClick 负责；
+  // 不能在 menu 设置时给 window 加 click 监听——同一笔点击事件
+  // 冒泡到 window 时监听器已生效，会立刻把刚打开的菜单关掉。
 
   // 已连接但尚未搜索/浏览时，默认加载随机歌曲列表
   useEffect(() => {
@@ -263,7 +270,17 @@ export default function NavidromeView() {
   const openMenu = (e: React.MouseEvent, row: NdSong) => {
     e.preventDefault();
     e.stopPropagation();
-    setMenu({ x: e.clientX, y: e.clientY, row });
+    const menuW = 190;
+    const x = e.clientX + menuW > window.innerWidth ? e.clientX - menuW : e.clientX;
+    const p = clampMenuPos(x, e.clientY, menuW, 150);
+    setMenu({ x: p.x, y: p.y, row });
+  };
+
+  const openMore = (rect: DOMRect, row: NdSong) => {
+    const menuW = 190;
+    const x = rect.right - menuW;
+    const p = clampMenuPos(x, rect.bottom + 4, menuW, 150);
+    setMenu({ x: p.x, y: p.y, row });
   };
 
   // 本地判定：有映射记录且对应曲目仍在资料库（未被软删除）；文件被删则回落在线播放
@@ -505,23 +522,26 @@ export default function NavidromeView() {
           isLocal={isLocal}
           onPlay={playSong}
           onMenu={openMenu}
+          onMore={openMore}
           sentinel={sentinel}
         />
       </div>
 
-      {/* 右键 / 更多菜单 */}
-      {menu && (
-        <>
-          <div className="fixed inset-0 z-[70]" onClick={() => setMenu(null)} />
-          <div
-            className="fixed z-[71] w-[150px] py-1.5 rounded-xl shadow-xl"
-            style={{
-              left: menu.x,
-              top: menu.y,
-              background: "var(--shade-strong)",
-              border: "1px solid var(--shade-hover)",
-            }}
-          >
+      {/* 右键 / 更多菜单。必须 Portal 到 body：fixed 定位的包含块必须是视口；
+          留在 .glass 卡片内会被 backdrop-filter 变成相对卡片定位，
+          菜单会弹到远离按钮的位置甚至视口外 */}
+      {menu &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[70]"
+              onClick={() => setMenu(null)}
+              onContextMenu={(e) => e.preventDefault()}
+            />
+            <div
+              className="fixed z-[71] w-[190px] menu-solid rounded-xl p-1.5 shadow-2xl anim-menu"
+              style={{ left: menu.x, top: menu.y }}
+            >
             {(
               [
                 ["play", "播放", () => playSong(menu.row)],
@@ -547,10 +567,10 @@ export default function NavidromeView() {
                 <button
                   key={key}
                   disabled={done}
-                  className={`w-full px-3 py-2 text-left text-[12.5px] ${
+                  className={`w-full h-8 px-2.5 rounded-lg flex items-center text-left text-[12.5px] ${
                     done
-                      ? "text-[var(--ink-3)] cursor-default"
-                      : "text-[var(--ink)] hover:bg-[var(--shade-hover)]"
+                      ? "text-[var(--ink-3)]"
+                      : "text-[var(--ink)] hover:bg-[var(--shade-strong)]"
                   }`}
                   onClick={() => {
                     if (done) return;
@@ -562,9 +582,10 @@ export default function NavidromeView() {
                 </button>
               );
             })}
-          </div>
-        </>
-      )}
+            </div>
+          </>,
+          document.body
+        )}
     </div>
   );
 }

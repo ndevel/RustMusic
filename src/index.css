@@ -167,6 +167,18 @@ body.dragging-rows * {
   border: 1px solid var(--glass-line);
 }
 
+/* 弹出菜单：纯色不透明底，不依赖 backdrop-filter（部分 WebView 下模糊失效，
+   半透明底会透出下层封面/列表内容）。底色须明显区别于应用背景，
+   否则在深色主题下会融入背景、看起来像"透明"。 */
+.menu-solid {
+  background: #2b221a;
+  border: 1px solid rgba(243, 233, 216, 0.16);
+}
+html[data-theme="light"] .menu-solid {
+  background: #ffffff;
+  border: 1px solid rgba(43, 53, 70, 0.16);
+}
+
 /* ---------- 液态玻璃（浅色主题特化） ----------
    高光栈来自「纯CSS液态玻璃」参考：
    · 多层 inset 白高光 = 玻璃边缘反光
